@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --exec ts-node src/index.ts",
-    "seed": "ts-node src/seed.ts",
+    "dev": "nodemon --watch 'src/**/*.ts' --exec 'npx tsx' src/index.ts",
+    "seed": "npx tsx src/seed.ts",
     "build": "tsc",
+    "lint": "tsc --noEmit",
     "start": "node dist/index.js"
   },
   "keywords": [],

@@ -19,7 +19,10 @@ export const startWorker = () => {
     try {
       await Evaluation.findByIdAndUpdate(evaluationId, { status: 'RUNNING' });
       
+      const startTime = Date.now();
       const output = await runPythonEvaluation(evaluationId, runId) as string;
+      const endTime = Date.now();
+      const durationSeconds = Math.round((endTime - startTime) / 1000);
       
       // Parse JSON
       const startMarker = "---AGENTGUARD_EVALUATION_JSON_START---";
@@ -38,16 +41,27 @@ export const startWorker = () => {
       const reports = payload.reports; // Array of reports per agent
       const all_results = payload.all_results; // All specific test results
       
-      // Find the report matching the requested agentId/version
-      // The python script tests 'BankingAgentSafe' and 'BankingAgentVulnerable'
-      const targetAgentName = agentId === 'agt-001' ? 'BankingAgentSafe' : 'BankingAgentVulnerable';
+      // Look up the agent from the database to determine which pipeline agent to use
+      const { Agent } = await import('../models');
+      const agentDoc = await Agent.findOne({ agentId });
+      
+      // Map stored agent name to pipeline agent name
+      // The pipeline always tests both BankingAgentSafe and BankingAgentVulnerable
+      // We select the correct report based on the agent's name/type
+      let targetAgentName: string;
+      if (agentDoc && agentDoc.name.toLowerCase().includes('vulnerable')) {
+        targetAgentName = 'BankingAgentVulnerable';
+      } else {
+        targetAgentName = 'BankingAgentSafe';
+      }
+      
       const report = reports.find((r: any) => r.agentVersion === targetAgentName);
       
       if (!report) {
-        throw new Error(`Report for agent ${targetAgentName} not found in output.`);
+        throw new Error(`Report for agent ${targetAgentName} (agentId: ${agentId}) not found in output.`);
       }
 
-      // 1. Update Evaluation
+      // 1. Update Evaluation with actual calculated duration
       await Evaluation.findByIdAndUpdate(evaluationId, { 
         status: 'COMPLETED',
         totalTests: report.totalTests,
@@ -55,7 +69,7 @@ export const startWorker = () => {
         failed: report.failedTests,
         reliability: report.passRate,
         criticalFailures: report.criticalFailures,
-        durationSeconds: 15 // Mock duration or calc from actual timestamps
+        durationSeconds
       });
 
       // Filter results for this agent

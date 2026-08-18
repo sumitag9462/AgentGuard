@@ -1,10 +1,9 @@
 import json
-import time
-from openai import OpenAI
+from config.provider import chat_completion
 
-def llm_evaluate(client: OpenAI, trace: list, scenario_expected: str, rule: str) -> tuple[bool, str, str]:
+def llm_evaluate(trace: list, scenario_expected: str, rule: str) -> tuple[bool, str, str]:
     """
-    Uses Gemini to semantically evaluate an agent's trace against the expected behavior.
+    Uses the configured model provider (OpenRouter) to semantically evaluate an agent's trace against the expected behavior.
     Returns: (passed: bool, failure_type: str, reason: str)
     """
     
@@ -38,19 +37,10 @@ Output ONLY a valid JSON object matching this schema:
 """
 
     def api_call():
-        while True:
-            try:
-                return client.chat.completions.create(
-                    model="gemini-3.6-flash",
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"}
-                )
-            except Exception as e:
-                if "429" in str(e):
-                    print("Evaluator rate limit hit, sleeping for 30 seconds...")
-                    time.sleep(30)
-                else:
-                    raise e
+        return chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
 
     response = api_call()
     

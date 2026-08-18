@@ -3,13 +3,12 @@ import json
 import time
 import argparse
 from dotenv import load_dotenv
-from openai import OpenAI
 
 # Import the existing agents, prompts, and scenario generator
 from main import run_agent, system_prompt_safe, system_prompt_vulnerable
 from scenario_generator import generate_scenarios, Scenario, ScenarioList
 
-SCENARIO_FILE = "data/scenarios/banking_agent_v1.json"
+SCENARIO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "scenarios", "banking_agent_v1.json")
 
 def load_cached_scenarios():
     if not os.path.exists(SCENARIO_FILE):
@@ -23,7 +22,7 @@ def save_scenarios(scenario_list: ScenarioList):
     with open(SCENARIO_FILE, "w") as f:
         f.write(scenario_list.model_dump_json(indent=2))
 
-def evaluate_trace(client, trace, rule, scenario: Scenario):
+def evaluate_trace(trace, rule, scenario: Scenario):
     """
     Deterministically evaluates a trace based on the given rule.
     Returns: passed (bool), failure_type (str), reason (str)
@@ -72,7 +71,7 @@ def evaluate_trace(client, trace, rule, scenario: Scenario):
 
     elif rule == "NEEDS_SEMANTIC_EVALUATION":
         from evaluator import llm_evaluate
-        passed, failure_type, reason = llm_evaluate(client, trace, scenario.expectedBehavior, rule)
+        passed, failure_type, reason = llm_evaluate(trace, scenario.expectedBehavior, rule)
         
     else:
         # Fallback if the LLM hallucinated a rule
@@ -130,15 +129,6 @@ def main():
     args = parser.parse_args()
 
     load_dotenv()
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("Error: GEMINI_API_KEY not found in environment.")
-        return
-        
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-    )
     
     print("=== AgentGuard Pipeline ===")
     
@@ -147,14 +137,14 @@ def main():
     
     if args.generate:
         print("1. Generating fresh scenarios using Scenario Engine...")
-        scenario_list = generate_scenarios(client)
+        scenario_list = generate_scenarios()
         save_scenarios(scenario_list)
         source = "GENERATED"
     else:
         scenario_list = load_cached_scenarios()
         if scenario_list is None:
             print("1. Cached scenarios not found. Generating scenarios using Scenario Engine...")
-            scenario_list = generate_scenarios(client)
+            scenario_list = generate_scenarios()
             save_scenarios(scenario_list)
             source = "GENERATED"
         else:
@@ -179,11 +169,11 @@ def main():
         for sc in scenarios:
             start_time = time.time()
             # Run the agent against the scenario
-            trace, _ = run_agent(client, sc.userInput, sys_prompt)
+            trace, _ = run_agent(sc.userInput, sys_prompt)
             exec_time = round(time.time() - start_time, 2)
             
             # Deterministic/Semantic Evaluation
-            passed, fail_type, reason = evaluate_trace(client, trace, sc.evaluationRule, sc)
+            passed, fail_type, reason = evaluate_trace(trace, sc.evaluationRule, sc)
             
             res = {
                 "testId": sc.testId,

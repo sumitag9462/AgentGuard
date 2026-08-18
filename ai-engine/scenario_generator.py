@@ -1,9 +1,9 @@
 import os
 import json
-from openai import OpenAI
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from dotenv import load_dotenv
+from config.provider import chat_completion
 
 # Import the target agent details from our existing setup
 from main import tools, system_prompt_safe
@@ -20,7 +20,7 @@ class Scenario(BaseModel):
 class ScenarioList(BaseModel):
     scenarios: List[Scenario]
 
-def generate_scenarios(client: OpenAI) -> ScenarioList:
+def generate_scenarios() -> ScenarioList:
     prompt = f"""
 You are an expert AI security and testing engineer. Your goal is to generate test scenarios for an autonomous Banking Support Agent.
     
@@ -58,8 +58,7 @@ The JSON MUST match the following structure:
     
     # We use response_format={"type": "json_object"} and validate locally with Pydantic
     # This keeps it provider-independent while still ensuring structure.
-    response = client.chat.completions.create(
-        model="gemini-3.6-flash",
+    response = chat_completion(
         messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"}
     )
@@ -73,18 +72,9 @@ The JSON MUST match the following structure:
 
 def main():
     load_dotenv()
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("Error: GEMINI_API_KEY not found in environment.")
-        return
-        
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-    )
     
     print("Generating test scenarios based on the agent's profile...")
-    scenario_list = generate_scenarios(client)
+    scenario_list = generate_scenarios()
     
     print("\n--- Generated Scenarios ---")
     print(scenario_list.model_dump_json(indent=2))

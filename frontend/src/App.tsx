@@ -22,6 +22,7 @@ function App() {
         <Route path="traces/:id" element={<TraceViewer />} />
         <Route path="scenarios" element={<Scenarios />} />
         <Route path="compare" element={<Compare />} />
+        <Route path="*" element={<div className="p-8 text-center mt-20"><h2 className="text-2xl font-bold">404 - Page Not Found</h2><p className="text-zinc-400 mt-2">The requested URL does not exist.</p></div>} />
       </Route>
     </Routes>
   );

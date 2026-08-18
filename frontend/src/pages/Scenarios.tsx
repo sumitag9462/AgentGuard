@@ -27,16 +27,14 @@ export default function Scenarios() {
       <Card>
         <CardHeader title="Active Test Suite" action={<Terminal weight="duotone" className="w-5 h-5 text-emerald-400" />} />
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Test ID</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Severity</TableHead>
-              <TableHead>Scenario</TableHead>
-              <TableHead>Expected Behavior</TableHead>
-              <TableHead>Evaluation Rule</TableHead>
-            </TableRow>
-          </TableHeader>
+          <TableHead>
+              <TableHeader>Test ID</TableHeader>
+              <TableHeader>Category</TableHeader>
+              <TableHeader>Severity</TableHeader>
+              <TableHeader>Scenario</TableHeader>
+              <TableHeader>Expected Behavior</TableHeader>
+              <TableHeader>Evaluation Rule</TableHeader>
+          </TableHead>
           <TableBody>
             {safeScenarios.map((scenario) => (
               <TableRow key={scenario.id || scenario.scenarioId || scenario.testId}>

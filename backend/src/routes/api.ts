@@ -31,6 +31,20 @@ router.post('/evaluations', async (req, res) => {
   try {
     const { agentId, version } = req.body;
     
+    // Input validation
+    if (!agentId || typeof agentId !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid required field: agentId' });
+    }
+    if (!version || typeof version !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid required field: version' });
+    }
+    
+    // Verify agent exists
+    const agent = await Agent.findOne({ agentId });
+    if (!agent) {
+      return res.status(404).json({ error: `Agent not found: ${agentId}` });
+    }
+    
     // Create new pending evaluation
     const runId = `RUN-${crypto.randomInt(1000, 9999)}`;
     const newEval = new Evaluation({
@@ -43,10 +57,12 @@ router.post('/evaluations', async (req, res) => {
     
     await newEval.save();
     
-    // Queue job
+    // Queue job — include agentId and version so the worker knows which agent to evaluate
     await evaluationQueue.add('run-evaluation', {
       evaluationId: newEval._id,
-      runId: newEval.runId
+      runId: newEval.runId,
+      agentId: newEval.agentId,
+      version: newEval.version
     });
     
     res.status(201).json(newEval);
@@ -65,10 +81,29 @@ router.get('/agents', async (req, res) => {
   }
 });
 
+// GET specific agent by agentId
+router.get('/agents/:id', async (req, res) => {
+  try {
+    const agent = await Agent.findOne({ agentId: req.params.id });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    res.json(agent);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch agent' });
+  }
+});
+
 // POST register agent
 router.post('/agents', async (req, res) => {
   try {
     const { name, description, endpoint } = req.body;
+    
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid required field: name' });
+    }
+    if (!description || typeof description !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid required field: description' });
+    }
+    
     const newAgent = new Agent({
       agentId: `agt-${crypto.randomBytes(4).toString('hex')}`,
       name,
@@ -118,6 +153,54 @@ router.get('/failures/:id', async (req, res) => {
     res.json(failure);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET versions/evaluations for an agent
+router.get('/agents/:id/versions', async (req, res) => {
+  try {
+    const evals = await Evaluation.find({ agentId: req.params.id, status: 'COMPLETED' }).sort({ timestamp: -1 });
+    res.json(evals);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch versions' });
+  }
+});
+
+// POST compare two evaluations (regression detection)
+router.post('/agents/:id/compare', async (req, res) => {
+  try {
+    const { baseEvalId, targetEvalId } = req.body;
+    
+    const baseEval = await Evaluation.findById(baseEvalId);
+    const targetEval = await Evaluation.findById(targetEvalId);
+    
+    if (!baseEval || !targetEval) {
+      return res.status(404).json({ error: 'One or both evaluations not found' });
+    }
+    
+    const baseFailures = await Failure.find({ evaluationId: baseEvalId });
+    const targetFailures = await Failure.find({ evaluationId: targetEvalId });
+    
+    const baseFailedTestIds = new Set(baseFailures.map(f => f.testId));
+    const targetFailedTestIds = new Set(targetFailures.map(f => f.testId));
+    
+    // New Failures: Failed in target, but passed in base
+    const newFailures = targetFailures.filter(f => !baseFailedTestIds.has(f.testId));
+    
+    // Fixed Failures: Failed in base, but passed in target
+    const fixedFailures = baseFailures.filter(f => !targetFailedTestIds.has(f.testId));
+    
+    const reliabilityDelta = targetEval.reliability - baseEval.reliability;
+    
+    res.json({
+      baseVersion: baseEval.version,
+      targetVersion: targetEval.version,
+      reliabilityDelta: parseFloat(reliabilityDelta.toFixed(2)),
+      newFailures,
+      fixedFailures
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate regression report' });
   }
 });
 

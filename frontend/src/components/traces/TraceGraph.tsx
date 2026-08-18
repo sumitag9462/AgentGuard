@@ -122,14 +122,14 @@ export default function TraceGraph({ trace }: { trace: Trace }) {
             </div>
             <div>
               <span className="text-zinc-500 text-xs">Content</span>
-              <div className="text-zinc-300 text-sm bg-zinc-900 p-2 rounded mt-1 border border-white/5 break-words max-h-40 overflow-y-auto">
+              <div className="text-zinc-300 text-sm bg-zinc-900 p-2 rounded mt-1 border border-white/5 wrap-break-word max-h-40 overflow-y-auto">
                 {selectedNodeData.fullLabel}
               </div>
             </div>
             {selectedNodeData.metadata && Object.keys(selectedNodeData.metadata).length > 0 && (
               <div>
                 <span className="text-zinc-500 text-xs">Arguments / Result</span>
-                <pre className="text-emerald-400 font-mono text-xs bg-zinc-900 p-2 rounded mt-1 border border-white/5 overflow-x-auto">
+                <pre className="text-emerald-400 font-mono text-xs bg-zinc-900 p-2 rounded mt-1 border border-white/5 overflow-x-auto wrap-break-word">
                   {JSON.stringify(selectedNodeData.metadata, null, 2)}
                 </pre>
               </div>

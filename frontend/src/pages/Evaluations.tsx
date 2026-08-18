@@ -12,7 +12,7 @@ import { useState } from 'react';
 export default function Evaluations() {
   const navigate = useNavigate();
   const [isStarting, setIsStarting] = useState(false);
-  const { data: evaluations, mutate, isLoading } = useSWR<Evaluation[]>('/evaluations', fetcher, { refreshInterval: 5000 });
+  const { data: evaluations, error, mutate, isLoading } = useSWR<Evaluation[]>('/evaluations', fetcher, { refreshInterval: 5000 });
 
   const handleRunEvaluation = async () => {
     try {
@@ -30,6 +30,17 @@ export default function Evaluations() {
       setIsStarting(false);
     }
   };
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-200">Cannot load evaluations</h2>
+          <p className="text-zinc-500 mt-2">The backend service might be down or unreachable.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">

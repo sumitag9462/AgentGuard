@@ -1,10 +1,11 @@
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type TestStatus = 'PASSED' | 'FAILED' | 'SKIPPED';
-export type RunStatus = 'COMPLETED' | 'RUNNING' | 'FAILED';
+export type RunStatus = 'COMPLETED' | 'RUNNING' | 'FAILED' | 'PENDING';
 
 export interface Agent {
   _id?: string;
   id?: string;
+  agentId?: string;
   name: string;
   description: string;
   provider: string;

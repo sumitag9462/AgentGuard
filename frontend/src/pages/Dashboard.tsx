@@ -16,8 +16,8 @@ export default function Dashboard() {
   const [isStarting, setIsStarting] = useState(false);
 
   // Fetch real data from backend
-  const { data: evaluations, mutate: mutateEvals } = useSWR<Evaluation[]>('/evaluations', fetcher, { refreshInterval: 5000 });
-  const { data: failures } = useSWR<Failure[]>('/failures', fetcher, { refreshInterval: 5000 });
+  const { data: evaluations, error: evalsError, mutate: mutateEvals } = useSWR<Evaluation[]>('/evaluations', fetcher, { refreshInterval: 5000 });
+  const { data: failures, error: failsError } = useSWR<Failure[]>('/failures', fetcher, { refreshInterval: 5000 });
   
   // Using a mock reliability trend based on the evaluations if available
   const reliabilityTrend = evaluations ? evaluations.slice(0, 10).reverse().map(e => ({
@@ -43,6 +43,18 @@ export default function Dashboard() {
       setIsStarting(false);
     }
   };
+
+  if (evalsError || failsError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
+        <Warning className="w-12 h-12 text-rose-500/50" />
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-200">Cannot connect to AgentGuard server</h2>
+          <p className="text-zinc-500 mt-2">The backend service might be down or unreachable.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!evaluations || !failures) {
     return <div className="text-zinc-400">Loading dashboard data...</div>;

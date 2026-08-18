@@ -109,7 +109,7 @@ export default function TraceGraph({ trace }: { trace: Trace }) {
       </ReactFlow>
 
       {/* Metadata Overlay */}
-      {selectedNodeData && (
+      {selectedNodeData ? (
         <div className="absolute top-4 right-4 w-80 bg-zinc-950/90 backdrop-blur-md border border-white/10 rounded-xl p-5 shadow-2xl z-10">
           <div className="flex justify-between items-center mb-3">
             <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Node Metadata</div>
@@ -126,17 +126,17 @@ export default function TraceGraph({ trace }: { trace: Trace }) {
                 {selectedNodeData.fullLabel}
               </div>
             </div>
-            {selectedNodeData.metadata && Object.keys(selectedNodeData.metadata).length > 0 && (
+            {selectedNodeData.metadata && Object.keys(selectedNodeData.metadata).length > 0 ? (
               <div>
                 <span className="text-zinc-500 text-xs">Arguments / Result</span>
                 <pre className="text-emerald-400 font-mono text-xs bg-zinc-900 p-2 rounded mt-1 border border-white/5 overflow-x-auto wrap-break-word">
                   {JSON.stringify(selectedNodeData.metadata, null, 2)}
                 </pre>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -18,7 +18,7 @@ interface NodeData {
   step: string;
   label: string;
   status?: string;
-  metadata?: any;
+  metadata?: unknown;
   fullLabel?: string;
 }
 
@@ -51,7 +51,7 @@ const nodeTypes = {
 export default function TraceGraph({ trace }: { trace: Trace }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [selectedNodeData, setSelectedNodeData] = useState<any>(null);
+  const [selectedNodeData, setSelectedNodeData] = useState<NodeData | null>(null);
 
   useEffect(() => {
     if (!trace || !trace.events) return;

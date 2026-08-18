@@ -4,7 +4,15 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import useSWR from 'swr';
 import api, { fetcher } from '../services/apiClient';
-import type { Agent, Evaluation } from '../types';
+import type { Agent, Evaluation, Failure } from '../types';
+
+interface ComparisonData {
+  baseVersion: string;
+  targetVersion: string;
+  reliabilityDelta: number;
+  newFailures: Failure[];
+  fixedFailures: Failure[];
+}
 
 export default function Compare() {
   const { data: agents } = useSWR<Agent[]>('/agents', fetcher);
@@ -12,7 +20,7 @@ export default function Compare() {
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [baseEvalId, setBaseEvalId] = useState('');
   const [targetEvalId, setTargetEvalId] = useState('');
-  const [comparison, setComparison] = useState<any>(null);
+  const [comparison, setComparison] = useState<ComparisonData | null>(null);
   const [loading, setLoading] = useState(false);
 
   const { data: versions } = useSWR<Evaluation[]>(selectedAgentId ? `/agents/${selectedAgentId}/versions` : null, fetcher);
@@ -45,7 +53,7 @@ export default function Compare() {
         <div className="flex-1 flex flex-col gap-1.5">
           <label className="text-sm font-medium text-zinc-300">Target Agent</label>
           <select 
-            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50"
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
             value={selectedAgentId}
             onChange={(e) => { setSelectedAgentId(e.target.value); setBaseEvalId(''); setTargetEvalId(''); setComparison(null); }}
           >
@@ -58,7 +66,7 @@ export default function Compare() {
           <label className="text-sm font-medium text-zinc-300">Base Version</label>
           <select 
             disabled={!selectedAgentId}
-            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50 disabled:opacity-50"
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 disabled:opacity-50"
             value={baseEvalId}
             onChange={(e) => setBaseEvalId(e.target.value)}
           >
@@ -71,7 +79,7 @@ export default function Compare() {
           <label className="text-sm font-medium text-zinc-300">Target Version</label>
           <select 
             disabled={!selectedAgentId}
-            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50 disabled:opacity-50"
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 disabled:opacity-50"
             value={targetEvalId}
             onChange={(e) => setTargetEvalId(e.target.value)}
           >
@@ -114,7 +122,7 @@ export default function Compare() {
               <div className="p-2">
                 {comparison.newFailures?.length > 0 ? (
                   <div className="flex flex-col gap-2">
-                    {comparison.newFailures.map((f: any) => (
+                    {comparison.newFailures.map((f: Failure) => (
                       <div key={f.testId} className="bg-zinc-950 p-3 rounded border border-rose-500/20 text-sm">
                         <span className="font-mono text-zinc-300 mr-2">{f.testId}</span>
                         <Badge variant="danger">{f.severity}</Badge>
@@ -135,7 +143,7 @@ export default function Compare() {
               <div className="p-2">
                 {comparison.fixedFailures?.length > 0 ? (
                   <div className="flex flex-col gap-2">
-                    {comparison.fixedFailures.map((f: any) => (
+                    {comparison.fixedFailures.map((f: Failure) => (
                       <div key={f.testId} className="bg-zinc-950 p-3 rounded border border-emerald-500/20 text-sm">
                         <span className="font-mono text-zinc-300 mr-2">{f.testId}</span>
                         <Badge variant="success">FIXED</Badge>

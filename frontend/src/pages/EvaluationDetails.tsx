@@ -87,7 +87,7 @@ export default function EvaluationDetails() {
             <CardHeader title="Failure Breakdown" />
             <div className="flex flex-col gap-3">
               {Object.entries(failureBreakdown).map(([type, count]) => (
-                <div key={type} className="flex justify-between items-center pb-3 border-b border-white/5 last:border-0 last:pb-0">
+                <div key={type} className="flex justify-between items-center pb-3 border-b border-white/5 last:border-0">
                   <span className="text-zinc-300">{type}</span>
                   <span className="font-mono text-zinc-100">{count}</span>
                 </div>

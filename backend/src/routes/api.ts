@@ -58,10 +58,35 @@ router.post('/evaluations', async (req, res) => {
 // GET agents
 router.get('/agents', async (req, res) => {
   try {
-    const agents = await Agent.find();
+    const agents = await Agent.find().sort({ lastEvaluated: -1 });
     res.json(agents);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch agents' });
+  }
+});
+
+// POST register agent
+router.post('/agents', async (req, res) => {
+  try {
+    const { name, description, endpoint } = req.body;
+    const newAgent = new Agent({
+      agentId: `agt-${crypto.randomBytes(4).toString('hex')}`,
+      name,
+      description,
+      provider: 'Custom Webhook',
+      endpoint,
+      tools: [],
+      policies: [],
+      latestVersion: 'v1.0.0',
+      reliability: 0,
+      status: 'Healthy',
+      lastEvaluated: new Date()
+    });
+    
+    await newAgent.save();
+    res.status(201).json(newAgent);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to register agent' });
   }
 });
 

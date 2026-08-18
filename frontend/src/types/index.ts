@@ -14,6 +14,7 @@ export interface Agent {
   reliability: number;
   status: 'Healthy' | 'Degraded' | 'Offline';
   lastEvaluated: string;
+  endpoint?: string;
 }
 
 export interface AgentVersion {

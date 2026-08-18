@@ -22,6 +22,7 @@ export interface IAgent extends Document {
   reliability: number;
   status: 'Healthy' | 'Degraded' | 'Offline';
   lastEvaluated: Date;
+  endpoint?: string;
 }
 
 const AgentSchema: Schema = new Schema({
@@ -41,7 +42,8 @@ const AgentSchema: Schema = new Schema({
   latestVersion: { type: String, required: true },
   reliability: { type: Number, default: 0 },
   status: { type: String, enum: ['Healthy', 'Degraded', 'Offline'], default: 'Healthy' },
-  lastEvaluated: { type: Date, default: Date.now }
+  lastEvaluated: { type: Date, default: Date.now },
+  endpoint: { type: String }
 });
 
 export const Agent = mongoose.model<IAgent>('Agent', AgentSchema);

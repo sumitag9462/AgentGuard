@@ -21,3 +21,4 @@ env/
 
 # Custom
 .gemini/
+backend/mongo-data/

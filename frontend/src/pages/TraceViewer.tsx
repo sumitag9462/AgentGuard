@@ -12,11 +12,11 @@ export default function TraceViewer() {
   const { data: trace, isLoading } = useSWR<Trace>(`/traces/${id}`, fetcher);
 
   if (isLoading) {
-    return <div className="p-8 text-center text-zinc-500">Loading trace...</div>;
+    return <div className="p-8 text-center text-content-secondary">Loading trace...</div>;
   }
 
   if (!trace) {
-    return <div className="text-rose-500 p-8">Trace not found.</div>;
+    return <div className="text-critical p-8">Trace not found.</div>;
   }
 
   return (
@@ -26,19 +26,19 @@ export default function TraceViewer() {
         <div className="flex items-center gap-4">
           <button 
             onClick={() => navigate(-1)}
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-zinc-900 border border-white/5 text-zinc-400 hover:text-zinc-100 transition-colors"
+            className="flex items-center justify-center w-8 h-8 rounded-md bg-panel border border-border-subtle text-content-secondary hover:text-content-primary hover:bg-panel-hover transition-colors"
           >
             <CaretLeft className="w-4 h-4" />
           </button>
           <div>
-            <h1 className="text-xl font-bold text-zinc-50">Execution Trace</h1>
-            <p className="text-sm text-zinc-500 font-mono">Test ID: {trace.testId}</p>
+            <h1 className="text-xl font-bold text-content-primary">Execution Trace</h1>
+            <p className="text-[13px] text-content-secondary font-mono">Test ID: {trace.testId}</p>
           </div>
         </div>
       </div>
 
       {/* Trace Graph Container */}
-      <div className="flex-1 rounded-2xl border border-white/5 overflow-hidden shadow-2xl relative">
+      <div className="flex-1 rounded-lg border border-border-subtle bg-canvas overflow-hidden relative">
         <TraceGraph trace={trace} />
         
         {/* We will let TraceGraph handle its own internal node selection state or omit the static overlay for now */}

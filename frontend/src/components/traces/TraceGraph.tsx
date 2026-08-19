@@ -30,16 +30,16 @@ export function AnimatedNode({ data }: { data: NodeData }) {
       transition={{ type: "spring", duration: 0.5, bounce: 0.2 }}
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.97 }}
-      className={`px-3 py-2 shadow-xl rounded-lg border ${
-        data.status === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 
-        data.status === 'danger' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' : 
-        'bg-zinc-900 border-zinc-700 text-zinc-100'
+      className={`px-3 py-2 shadow-xl rounded-md border ${
+        data.status === 'success' ? 'bg-safe-muted border-safe/30 text-safe' : 
+        data.status === 'danger' ? 'bg-critical-muted border-critical/30 text-critical' : 
+        'bg-panel border-border-subtle text-content-primary'
       } text-xs font-mono cursor-pointer`}
     >
-      <Handle type="target" position={Position.Top} className="w-2 h-2 rounded-full border-none bg-zinc-600" />
+      <Handle type="target" position={Position.Top} className="w-2 h-2 rounded-full border-none bg-content-muted" />
       <div className="font-semibold mb-1 opacity-50 text-[10px] uppercase tracking-wider">{data.step}</div>
       <div>{data.label}</div>
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 rounded-full border-none bg-zinc-600" />
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 rounded-full border-none bg-content-muted" />
     </motion.div>
   );
 }
@@ -78,7 +78,7 @@ export default function TraceGraph({ trace }: { trace: Trace }) {
         source: e1.eventId || `node-${i}`,
         target: e2.eventId || `node-${i+1}`,
         animated: true,
-        style: { stroke: e2.status === 'danger' ? '#f43f5e' : e2.status === 'success' ? '#10b981' : '#52525b', strokeWidth: 2 }
+        style: { stroke: e2.status === 'danger' ? 'var(--color-critical)' : e2.status === 'success' ? 'var(--color-safe)' : '#52525b', strokeWidth: 2 }
       });
     }
 
@@ -93,7 +93,7 @@ export default function TraceGraph({ trace }: { trace: Trace }) {
   };
 
   return (
-    <div className="w-full h-full rounded-lg overflow-hidden bg-zinc-950 relative">
+    <div className="w-full h-full rounded-lg overflow-hidden bg-canvas relative">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -105,31 +105,31 @@ export default function TraceGraph({ trace }: { trace: Trace }) {
         fitView
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#27272a" gap={16} size={1} />
+        <Background color="var(--color-border-subtle)" gap={16} size={1} />
       </ReactFlow>
 
       {/* Metadata Overlay */}
       {selectedNodeData && (
-        <div className="absolute top-4 right-4 w-80 bg-zinc-950/90 backdrop-blur-md border border-white/10 rounded-xl p-5 shadow-2xl z-10">
+        <div className="absolute top-4 right-4 w-80 bg-panel/90 backdrop-blur-md border border-border-subtle rounded-lg p-5 shadow-2xl z-10">
           <div className="flex justify-between items-center mb-3">
-            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Node Metadata</div>
-            <button onClick={() => setSelectedNodeData(null)} className="text-zinc-500 hover:text-zinc-300">✕</button>
+            <div className="text-[11px] font-bold text-content-secondary uppercase tracking-wider">Node Metadata</div>
+            <button onClick={() => setSelectedNodeData(null)} className="text-content-muted hover:text-content-primary">✕</button>
           </div>
           <div className="flex flex-col gap-3">
             <div>
-              <span className="text-zinc-500 text-xs">Step Type</span>
-              <div className="text-zinc-200 font-mono text-sm">{selectedNodeData.step}</div>
+              <span className="text-content-muted text-[11px]">Step Type</span>
+              <div className="text-content-primary font-mono text-[13px]">{selectedNodeData.step}</div>
             </div>
             <div>
-              <span className="text-zinc-500 text-xs">Content</span>
-              <div className="text-zinc-300 text-sm bg-zinc-900 p-2 rounded mt-1 border border-white/5 break-words max-h-40 overflow-y-auto">
+              <span className="text-content-muted text-[11px]">Content</span>
+              <div className="text-content-secondary text-[13px] bg-canvas p-2 rounded-sm mt-1 border border-border-subtle break-all max-h-40 overflow-y-auto">
                 {selectedNodeData.fullLabel}
               </div>
             </div>
             {selectedNodeData.metadata && Object.keys(selectedNodeData.metadata).length > 0 && (
               <div>
-                <span className="text-zinc-500 text-xs">Arguments / Result</span>
-                <pre className="text-emerald-400 font-mono text-xs bg-zinc-900 p-2 rounded mt-1 border border-white/5 overflow-x-auto">
+                <span className="text-content-muted text-[11px]">Arguments / Result</span>
+                <pre className="text-safe font-mono text-[11px] bg-canvas p-2 rounded-sm mt-1 border border-border-subtle overflow-x-auto">
                   {JSON.stringify(selectedNodeData.metadata, null, 2)}
                 </pre>
               </div>

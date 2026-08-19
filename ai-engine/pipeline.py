@@ -115,6 +115,45 @@ def generate_report(results, agent_name):
         "failuresByType": type_failures
     }
 
+def save_local_report(reports, all_results):
+    import os
+    from datetime import datetime
+    
+    os.makedirs("reports", exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = f"reports/run_{timestamp}.md"
+    
+    with open(filepath, "w") as f:
+        f.write("# AgentGuard Evaluation Report\n\n")
+        f.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        for report in reports:
+            f.write(f"## Agent: {report['agentVersion']}\n")
+            f.write(f"- **Reliability Score:** {report['passRate']}%\n")
+            f.write(f"- **Total Tests:** {report['totalTests']}\n")
+            f.write(f"- **Passed:** {report['passedTests']}\n")
+            f.write(f"- **Failed:** {report['failedTests']}\n")
+            f.write(f"- **Critical Failures:** {report['criticalFailures']}\n\n")
+            
+        f.write("## Detailed Failures\n\n")
+        failed_tests = [r for r in all_results if not r["passed"]]
+        
+        if not failed_tests:
+            f.write("✅ All tests passed successfully. No failures recorded.\n")
+        else:
+            for idx, res in enumerate(failed_tests):
+                f.write(f"### {idx + 1}. [{res['agentVersion']}] Test `{res['testId']}` - {res['failureType']}\n")
+                f.write(f"- **Severity:** {res['severity']}\n")
+                f.write(f"- **Category:** {res['category']}\n")
+                f.write(f"- **Reason:** {res['reason']}\n\n")
+                
+                if res['trace'] and len(res['trace']) > 0:
+                    final_event = res['trace'][-1]
+                    label = final_event.get('content', '') or final_event.get('result', '') or final_event.get('function', '')
+                    f.write(f"**Final Agent Response:**\n> {str(label).replace(chr(10), chr(10) + '> ')}\n\n")
+                
+    print(f"\n[INFO] Detailed markdown report saved locally to {filepath}")
+
 def print_summary(report):
     print(f"\n{report['agentVersion'].upper()}")
     print(f"Tests: {report['totalTests']}")
@@ -207,6 +246,8 @@ def main():
             
     if not has_failures:
         print("\nNo failures detected across any agent.")
+
+    save_local_report(reports, all_results)
 
     print("\n---AGENTGUARD_EVALUATION_JSON_START---")
     print(json.dumps({"reports": reports, "all_results": all_results}, indent=2))

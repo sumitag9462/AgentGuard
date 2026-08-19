@@ -12,7 +12,20 @@ export default function Agents() {
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState({ name: '', description: '', endpoint: '' });
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ status: string; message: string } | null>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    integrationType: 'WEBHOOK' as 'INTERNAL' | 'WEBHOOK',
+    endpoint: '',
+    webhook: {
+      url: '',
+      method: 'POST',
+      responseField: 'response',
+      traceField: 'trace'
+    }
+  });
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,12 +34,56 @@ export default function Agents() {
       await api.post('/agents', formData);
       await mutate();
       setIsModalOpen(false);
-      setFormData({ name: '', description: '', endpoint: '' });
+      setFormData({
+        name: '', description: '', integrationType: 'WEBHOOK', endpoint: '',
+        webhook: { url: '', method: 'POST', responseField: 'response', traceField: 'trace' }
+      });
+      setTestResult(null);
     } catch (err) {
       console.error('Failed to register agent', err);
       alert('Failed to register agent');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleEvaluate = async (agentId: string) => {
+    try {
+      const res = await api.post('/evaluations', { agentId, version: 'v1.0.0' });
+      const data = res.data;
+      if (data && data._id) {
+        window.location.href = `/evaluations/${data._id}`;
+      }
+    } catch (err) {
+      console.error('Failed to trigger evaluation', err);
+      alert('Failed to trigger evaluation');
+    }
+  };
+
+  const handleTestConnection = async () => {
+    if (!formData.webhook.url) return;
+    try {
+      setIsTesting(true);
+      setTestResult(null);
+      
+      const url = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+      const res = await fetch(`${url}/agents/test-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhook: formData.webhook })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        setTestResult({ status: 'Failed', message: data.error || 'Connection failed' });
+      } else {
+        setTestResult({ status: 'Connected', message: data.message || 'Connection successful!' });
+      }
+    } catch (err) {
+      setTestResult({ status: 'Failed', message: 'Connection failed' });
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -54,10 +111,14 @@ export default function Agents() {
                 <div>
                   <h3 className="text-lg font-medium text-zinc-100 flex items-center gap-2">
                     {agent.name}
-                    <Badge variant={agent.status === 'Healthy' ? 'success' : 'danger'}>{agent.status}</Badge>
+                    <Badge variant={agent.status === 'Healthy' || agent.status === 'Connected' ? 'success' : agent.status === 'Unreachable' || agent.status === 'Timeout' ? 'danger' : 'warning'}>{agent.status}</Badge>
                   </h3>
                   <div className="text-sm text-zinc-500 mt-0.5 font-mono">
-                    {agent.provider} {agent.endpoint && <span className="text-emerald-500/70 block truncate max-w-[200px] text-xs mt-1">{agent.endpoint}</span>}
+                    Integration: {agent.integrationType || 'INTERNAL'} 
+                    {agent.integrationType === 'WEBHOOK' && agent.webhook && (
+                      <span className="text-emerald-500/70 block truncate max-w-50 text-xs mt-1">{agent.webhook.url}</span>
+                    )}
+
                   </div>
                 </div>
               </div>
@@ -84,8 +145,8 @@ export default function Agents() {
             </div>
 
             <div className="mt-auto flex gap-3 pt-4 border-t border-white/5">
-              <Button variant="secondary" className="flex-1">View Details</Button>
-              <Button className="flex-1">Evaluate Now</Button>
+              <Button variant="secondary" className="flex-1" onClick={() => window.location.href = `/agents/${agent.agentId}`}>View Details</Button>
+              <Button className="flex-1" onClick={() => handleEvaluate(agent.agentId)}>Evaluate Now</Button>
             </div>
           </Card>
         ))}
@@ -108,14 +169,58 @@ export default function Agents() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium text-zinc-300">Description</label>
-                <textarea required value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50 min-h-[80px]" placeholder="Briefly describe the agent's purpose." />
+                <textarea required value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50 min-h-20" placeholder="Briefly describe the agent's purpose." />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-zinc-300">Webhook Endpoint URL</label>
-                <input required type="url" value={formData.endpoint} onChange={e => setFormData({...formData, endpoint: e.target.value})} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50" placeholder="https://api.your-app.com/v1/agent" />
+              <div className="flex flex-col gap-1.5 mb-2">
+                <label className="text-sm font-medium text-zinc-300">Integration Type</label>
+                <div className="flex gap-4 mt-1">
+                  <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer">
+                    <input type="radio" name="integrationType" checked={formData.integrationType === 'INTERNAL'} onChange={() => setFormData({...formData, integrationType: 'INTERNAL'})} className="accent-emerald-500" />
+                    Internal Agent
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer">
+                    <input type="radio" name="integrationType" checked={formData.integrationType === 'WEBHOOK'} onChange={() => setFormData({...formData, integrationType: 'WEBHOOK'})} className="accent-emerald-500" />
+                    Webhook API
+                  </label>
+                </div>
               </div>
+
+              {formData.integrationType === 'WEBHOOK' && (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-sm font-medium text-zinc-300">Webhook URL</label>
+                    <input required type="url" value={formData.webhook.url} onChange={e => setFormData({...formData, webhook: {...formData.webhook, url: e.target.value}})} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50" placeholder="https://api.example.com/chat" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-sm font-medium text-zinc-300">HTTP Method</label>
+                      <input required value={formData.webhook.method} onChange={e => setFormData({...formData, webhook: {...formData.webhook, method: e.target.value}})} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50" />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-sm font-medium text-zinc-300">Response Field</label>
+                      <input required value={formData.webhook.responseField} onChange={e => setFormData({...formData, webhook: {...formData.webhook, responseField: e.target.value}})} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50" />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-sm font-medium text-zinc-300">Optional Trace Field</label>
+                    <input value={formData.webhook.traceField} onChange={e => setFormData({...formData, webhook: {...formData.webhook, traceField: e.target.value}})} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50" />
+                  </div>
+                  
+                  {testResult && (
+                    <div className={`text-sm p-3 rounded-lg border ${testResult.status === 'Connected' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
+                      {testResult.message}
+                    </div>
+                  )}
+                </>
+              )}
               
               <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-white/5">
+                {formData.integrationType === 'WEBHOOK' && (
+                  <Button variant="secondary" onClick={handleTestConnection} type="button" disabled={isTesting || !formData.webhook.url}>
+                    {isTesting ? 'Testing...' : 'Test Connection'}
+                  </Button>
+                )}
+                <div className="flex-1"></div>
                 <Button variant="secondary" onClick={() => setIsModalOpen(false)} type="button">Cancel</Button>
                 <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Registering...' : 'Register'}</Button>
               </div>

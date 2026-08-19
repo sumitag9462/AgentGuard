@@ -20,9 +20,16 @@ export interface IAgent extends Document {
   policies: IPolicy[];
   latestVersion: string;
   reliability: number;
-  status: 'Healthy' | 'Degraded' | 'Offline';
+  status: 'Healthy' | 'Degraded' | 'Offline' | 'Connected' | 'Unreachable' | 'Timeout' | 'Invalid_Response' | 'Blocked' | 'Unknown';
   lastEvaluated: Date;
   endpoint?: string;
+  integrationType: 'INTERNAL' | 'WEBHOOK';
+  webhook?: {
+    url: string;
+    method: string;
+    responseField: string;
+    traceField: string;
+  };
 }
 
 const AgentSchema: Schema = new Schema({
@@ -39,11 +46,20 @@ const AgentSchema: Schema = new Schema({
     name: String,
     description: String
   }],
-  latestVersion: { type: String, required: true },
-  reliability: { type: Number, default: 0 },
-  status: { type: String, enum: ['Healthy', 'Degraded', 'Offline'], default: 'Healthy' },
+  latestVersion: { type: String, default: 'v1.0' },
+  reliability: { type: Number, default: 100 },
+  status: { type: String, enum: ['Healthy', 'Degraded', 'Offline', 'Connected', 'Unreachable', 'Timeout', 'Invalid_Response', 'Blocked', 'Unknown'], default: 'Healthy' },
   lastEvaluated: { type: Date, default: Date.now },
-  endpoint: { type: String }
+  endpoint: { type: String },
+  integrationType: { type: String, enum: ['INTERNAL', 'WEBHOOK'], default: 'INTERNAL' },
+  webhook: {
+    url: { type: String },
+    method: { type: String, default: 'POST' },
+    responseField: { type: String, default: 'response' },
+    traceField: { type: String, default: 'trace' }
+  }
+}, {
+  timestamps: true
 });
 
 export const Agent = mongoose.model<IAgent>('Agent', AgentSchema);

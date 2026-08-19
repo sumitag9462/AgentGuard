@@ -6,7 +6,7 @@ import { Table, TableHead, TableHeader, TableBody, TableRow, TableCell } from '.
 import { CaretLeft, CircleNotch } from '@phosphor-icons/react';
 import useSWR from 'swr';
 import { fetcher } from '../services/apiClient';
-import type { Evaluation, Failure } from '../types';
+import type { Evaluation, Failure, Agent } from '../types';
 import { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 
@@ -16,9 +16,12 @@ export default function EvaluationDetails() {
   
   const { data: evaluation, isLoading: evalLoading, mutate } = useSWR<Evaluation>(`/evaluations/${id}`, fetcher);
   const { data: failures, isLoading: failsLoading, mutate: mutateFailures } = useSWR<Failure[]>(`/evaluations/${id}/failures`, fetcher);
+  const { data: agent } = useSWR<Agent>(evaluation ? `/agents/${evaluation.agentId}` : null, fetcher);
 
   const [liveProgress, setLiveProgress] = useState({ total: 0, completed: 0, passed: 0, failed: 0 });
   const [liveLog, setLiveLog] = useState<string[]>([]);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     if (evaluation?.status === 'RUNNING' || evaluation?.status === 'PENDING') {
@@ -81,6 +84,35 @@ export default function EvaluationDetails() {
     });
   }
 
+  const handleExportReport = async () => {
+    if (!evaluation) return;
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      const url = `/api/evaluations/${evaluation._id}/report/download`;
+      const fullUrl = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', url) : `http://localhost:4000${url}`;
+      
+      const response = await fetch(fullUrl);
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status} ${response.statusText}`);
+      }
+      
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `agentguard-evaluation-${evaluation._id}.md`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err: any) {
+      setExportError(err.message || 'Failed to download report.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-8">
       {/* Breadcrumb / Back */}
@@ -101,15 +133,27 @@ export default function EvaluationDetails() {
               {isRunning && <CircleNotch className="w-3 h-3 ml-2 inline animate-spin" />}
             </Badge>
           </div>
-          <p className="text-zinc-400 flex items-center gap-2">
-            <span>{evaluation.agentId === 'agt-001' ? 'Banking Support Agent' : 'Banking Vulnerable Agent'}</span>
+          <p className="text-zinc-400 flex flex-wrap items-center gap-2">
+            <span>{agent ? agent.name : (evaluation.agentId === 'agt-001' ? 'Banking Support Agent' : 'Banking Vulnerable Agent')}</span>
             <span className="text-zinc-600">•</span>
             <span className="font-mono text-sm">{evaluation.version}</span>
             <span className="text-zinc-600">•</span>
             <span>{new Date(evaluation.timestamp).toLocaleString()}</span>
+            {agent && agent.integrationType === 'WEBHOOK' && (
+              <>
+                <span className="text-zinc-600">•</span>
+                <span className="text-emerald-500 font-mono text-xs">WEBHOOK</span>
+              </>
+            )}
           </p>
         </div>
-        <Button variant="secondary" disabled={isRunning}>Export Report</Button>
+        <div className="flex flex-col items-end gap-2">
+          <Button variant="secondary" disabled={isRunning || isExporting} onClick={handleExportReport}>
+            {isExporting && <CircleNotch className="w-4 h-4 mr-2 animate-spin" />}
+            {isExporting ? 'Exporting...' : 'Export Report'}
+          </Button>
+          {exportError && <span className="text-xs text-rose-500">{exportError}</span>}
+        </div>
       </div>
 
       {isRunning && (

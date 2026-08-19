@@ -15,6 +15,115 @@ router.get('/evaluations', async (req, res) => {
   }
 });
 
+// GET report download
+router.get('/evaluations/:id/report/download', async (req, res) => {
+  try {
+    const evaluation = await Evaluation.findById(req.params.id) as any;
+    if (!evaluation) {
+      return res.status(404).json({ error: 'Evaluation not found' });
+    }
+
+    const failures = await Failure.find({ evaluationId: req.params.id });
+    const traces = await Trace.find({ evaluationId: req.params.id });
+
+    // Generate Markdown Content
+    let md = `# AgentGuard Evaluation Report\n\n`;
+
+    md += `## Evaluation Summary\n\n`;
+    md += `Evaluation ID: ${evaluation._id}\n`;
+    md += `Agent: ${evaluation.agentId}\n`;
+    md += `Version: ${evaluation.version}\n`;
+    md += `Date: ${new Date(evaluation.timestamp).toUTCString()}\n`;
+    md += `Duration: ${evaluation.durationSeconds || 0}s\n\n`;
+
+    md += `## Reliability\n\n`;
+    md += `Overall Score: ${evaluation.reliability}%\n`;
+    md += `Tests: ${evaluation.totalTests}\n`;
+    md += `Passed: ${evaluation.passed}\n`;
+    md += `Failed: ${evaluation.failed}\n`;
+    md += `Critical: ${evaluation.criticalFailures}\n`;
+    md += `High: 0\nMedium: 0\nLow: 0\n\n`; // Defaulting to 0 as placeholders unless computed.
+
+    const failureBreakdown: Record<string, number> = {};
+    failures.forEach(f => {
+      failureBreakdown[f.failureType] = (failureBreakdown[f.failureType] || 0) + 1;
+    });
+
+    md += `## Failure Breakdown\n\n`;
+    if (Object.keys(failureBreakdown).length > 0) {
+      md += `Failure Type | Count\n`;
+      md += `--- | ---\n`;
+      Object.entries(failureBreakdown).forEach(([type, count]) => {
+        md += `${type} | ${count}\n`;
+      });
+    } else {
+      md += `No failures detected.\n`;
+    }
+    md += `\n`;
+
+    md += `## Test Results\n\n`;
+    if (failures.length > 0) {
+      md += `| Test ID | Category | Severity | Status | Failure Type |\n`;
+      md += `| --- | --- | --- | --- | --- |\n`;
+      failures.forEach(f => {
+        md += `| ${f.testId} | Unknown | ${f.severity} | FAILED | ${f.failureType} |\n`;
+      });
+      md += `\n`;
+    } else {
+      md += `All ${evaluation.totalTests} tests passed.\n\n`;
+    }
+
+    md += `## Failure Details\n\n`;
+    if (failures.length > 0) {
+      md += `For every failed test include:\n\n`;
+      failures.forEach((f) => {
+        md += `### ${f.testId}\n\n`;
+        md += `Category: Unknown\n`;
+        md += `Severity: ${f.severity}\n`;
+        md += `Status: FAILED\n`;
+        md += `Failure Type: ${f.failureType}\n\n`;
+        
+        md += `Scenario:\n${f.userInput}\n\n`;
+        md += `Expected Behavior:\n${f.expectedBehavior}\n\n`;
+        md += `Actual Behavior:\n${f.actualBehavior || 'Failed evaluation check.'}\n\n`;
+        md += `Reason:\n${(f as any).reason || f.actualBehavior || 'Policy violation.'}\n\n`;
+        md += `Recommendation:\n${f.recommendation || 'Review agent prompt to enforce stricter policy adherence.'}\n\n`;
+
+        // Trace logic
+        md += `## Execution Trace\n\n`;
+        const testTrace = traces.find(t => t.testId === f.testId);
+        if (testTrace && testTrace.events.length > 0) {
+          testTrace.events.forEach((evt, i) => {
+            if (evt.type === 'USER_INPUT') md += `User Input\n${evt.metadata || evt.label}\n`;
+            else if (evt.type === 'TOOL_CALL') md += `Tool Call\n${evt.label}\nArgs: ${JSON.stringify(evt.metadata)}\n`;
+            else if (evt.type === 'TOOL_RESULT') md += `Tool Result\n${evt.metadata || evt.label}\n`;
+            else if (evt.type === 'FINAL_RESPONSE') md += `Final Response\n${evt.label}\n`;
+            else md += `LLM\n${evt.label}\n`;
+            
+            if (i < testTrace.events.length - 1) md += `↓\n`;
+          });
+          md += `\n`;
+        } else {
+          md += `No trace available.\n\n`;
+        }
+      });
+    } else {
+      md += `No failures to display.\n\n`;
+    }
+
+    md += `## Version / Regression Information\n\n`;
+    md += `No regression data available for this report.\n\n`;
+    md += `## Final Assessment\n\n`;
+    md += `Evaluation completed with a reliability score of ${evaluation.reliability}%.`;
+
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="agentguard-evaluation-${evaluation._id}.md"`);
+    res.send(md);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET specific evaluation
 router.get('/evaluations/:id', async (req, res) => {
   try {
@@ -95,7 +204,7 @@ router.get('/agents/:id', async (req, res) => {
 // POST register agent
 router.post('/agents', async (req, res) => {
   try {
-    const { name, description, endpoint } = req.body;
+    const { name, description, endpoint, integrationType, webhook } = req.body;
     
     if (!name || typeof name !== 'string') {
       return res.status(400).json({ error: 'Missing or invalid required field: name' });
@@ -108,20 +217,162 @@ router.post('/agents', async (req, res) => {
       agentId: `agt-${crypto.randomBytes(4).toString('hex')}`,
       name,
       description,
-      provider: 'Custom Webhook',
+      provider: integrationType === 'WEBHOOK' ? 'Custom Webhook' : 'Internal Agent',
       endpoint,
       tools: [],
       policies: [],
       latestVersion: 'v1.0.0',
       reliability: 0,
       status: 'Healthy',
-      lastEvaluated: new Date()
+      lastEvaluated: new Date(),
+      integrationType: integrationType || 'INTERNAL',
+      webhook: integrationType === 'WEBHOOK' ? webhook : undefined
     });
     
     await newAgent.save();
     res.status(201).json(newAgent);
   } catch (err) {
     res.status(500).json({ error: 'Failed to register agent' });
+  }
+});
+
+// POST test connection
+import { isSafeWebhookUrl } from '../security/webhookSecurity';
+
+router.post('/agents/test-connection', async (req, res) => {
+  try {
+    const { webhook } = req.body;
+    if (!webhook || !webhook.url) {
+      return res.status(400).json({ error: 'Webhook URL is required' });
+    }
+
+    const { url, method = 'POST', responseField = 'response' } = webhook;
+    
+    if (!(await isSafeWebhookUrl(url))) {
+      return res.status(400).json({ status: 'Blocked', error: 'Webhook URL blocked by security policy' });
+    }
+
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), 10000); // 10s timeout
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          testId: 'AGENTGUARD_CONNECTION_TEST',
+          message: 'Reply with exactly AGENTGUARD_CONNECTION_OK.'
+        }),
+        signal: abortController.signal
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        return res.status(502).json({ status: 'Unreachable', error: `HTTP ${response.status}` });
+      }
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (e) {
+        return res.status(502).json({ status: 'Unreachable', error: 'Invalid JSON response' });
+      }
+
+      if (data && data[responseField] === 'AGENTGUARD_CONNECTION_OK') {
+        return res.json({ status: 'Connected', message: 'Connection successful!' });
+      } else {
+        return res.status(502).json({ status: 'Failed', error: `Invalid response format. Expected ${responseField}="AGENTGUARD_CONNECTION_OK"` });
+      }
+    } catch (err: any) {
+      clearTimeout(timeout);
+      if (err.name === 'AbortError') {
+        return res.status(504).json({ status: 'Timeout', error: 'Connection timed out after 10s' });
+      }
+      return res.status(502).json({ status: 'Unreachable', error: err.message });
+    }
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/agents/:id/test-connection', async (req, res) => {
+  try {
+    const agent = await Agent.findOne({ agentId: req.params.id });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (agent.integrationType !== 'WEBHOOK' || !agent.webhook) {
+      return res.status(400).json({ error: 'Agent is not a webhook integration' });
+    }
+
+    const { url, method, responseField } = agent.webhook;
+    
+    if (!(await isSafeWebhookUrl(url))) {
+      await Agent.updateOne({ agentId: agent.agentId }, { status: 'Blocked' });
+      return res.status(400).json({ status: 'Blocked', error: 'Webhook URL blocked by security policy' });
+    }
+
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), 10000); // 10s timeout
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          testId: 'AGENTGUARD_CONNECTION_TEST',
+          message: 'Reply with exactly AGENTGUARD_CONNECTION_OK.'
+        }),
+        signal: abortController.signal
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        await Agent.updateOne({ agentId: agent.agentId }, { status: 'Unreachable' });
+        return res.status(502).json({ status: 'Unreachable', error: `HTTP ${response.status}` });
+      }
+
+      // Read max 1MB
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength > 1024 * 1024) {
+        await Agent.updateOne({ agentId: agent.agentId }, { status: 'Invalid_Response' });
+        return res.status(502).json({ status: 'Invalid_Response', error: 'Response too large' });
+      }
+
+      let data;
+      try {
+        const text = new TextDecoder().decode(buffer);
+        data = JSON.parse(text);
+      } catch (e) {
+        await Agent.updateOne({ agentId: agent.agentId }, { status: 'Invalid_Response' });
+        return res.status(502).json({ status: 'Invalid_Response', error: 'Invalid JSON' });
+      }
+
+      const agentReply = data[responseField];
+      if (typeof agentReply === 'string' && agentReply.trim().includes('AGENTGUARD_CONNECTION_OK')) {
+        await Agent.updateOne({ agentId: agent.agentId }, { status: 'Connected' });
+        return res.json({ status: 'Connected', message: 'Connection successful' });
+      } else {
+        await Agent.updateOne({ agentId: agent.agentId }, { status: 'Invalid_Response' });
+        return res.status(502).json({ status: 'Invalid_Response', error: 'Did not receive expected reply' });
+      }
+    } catch (err: any) {
+      clearTimeout(timeout);
+      if (err.name === 'AbortError') {
+        await Agent.updateOne({ agentId: agent.agentId }, { status: 'Timeout' });
+        return res.status(504).json({ status: 'Timeout', error: 'Connection timed out' });
+      }
+      await Agent.updateOne({ agentId: agent.agentId }, { status: 'Unreachable' });
+      return res.status(502).json({ status: 'Unreachable', error: err.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Server error during connection test' });
   }
 });
 

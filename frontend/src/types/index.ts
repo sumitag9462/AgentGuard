@@ -13,9 +13,16 @@ export interface Agent {
   policies: Policy[];
   latestVersion: string;
   reliability: number;
-  status: 'Healthy' | 'Degraded' | 'Offline';
+  status: 'Healthy' | 'Degraded' | 'Offline' | 'Connected' | 'Unreachable' | 'Timeout' | 'Invalid_Response' | 'Blocked' | 'Unknown';
   lastEvaluated: string;
   endpoint?: string;
+  integrationType?: 'INTERNAL' | 'WEBHOOK';
+  webhook?: {
+    url: string;
+    method: string;
+    responseField: string;
+    traceField: string;
+  };
 }
 
 export interface AgentVersion {

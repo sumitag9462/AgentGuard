@@ -19,12 +19,27 @@ export const startWorker = () => {
     try {
       await Evaluation.findByIdAndUpdate(evaluationId, { status: 'RUNNING' });
       
+      const { Agent } = await import('../models');
+      const agentDoc = await Agent.findOne({ agentId });
+      if (!agentDoc) {
+        throw new Error(`Agent not found: ${agentId}`);
+      }
+      
       const startTime = Date.now();
-      const output = await runPythonEvaluation(evaluationId, runId) as string;
+      let output = '';
+      
+      if (agentDoc.integrationType === 'WEBHOOK') {
+        const { WebhookAgentExecutor } = await import('../services/agentExecution/webhookAgentExecutor');
+        const executor = new WebhookAgentExecutor();
+        output = await executor.execute(evaluationId, runId, agentDoc as any, version);
+      } else {
+        const { InternalAgentExecutor } = await import('../services/agentExecution/internalAgentExecutor');
+        const executor = new InternalAgentExecutor();
+        output = await executor.execute(evaluationId, runId, agentDoc as any, version);
+      }
+      
       const endTime = Date.now();
       const durationSeconds = Math.round((endTime - startTime) / 1000);
-      
-      // Parse JSON
       const startMarker = "---AGENTGUARD_EVALUATION_JSON_START---";
       const endMarker = "---AGENTGUARD_EVALUATION_JSON_END---";
       
@@ -41,18 +56,16 @@ export const startWorker = () => {
       const reports = payload.reports; // Array of reports per agent
       const all_results = payload.all_results; // All specific test results
       
-      // Look up the agent from the database to determine which pipeline agent to use
-      const { Agent } = await import('../models');
-      const agentDoc = await Agent.findOne({ agentId });
-      
       // Map stored agent name to pipeline agent name
       // The pipeline always tests both BankingAgentSafe and BankingAgentVulnerable
       // We select the correct report based on the agent's name/type
-      let targetAgentName: string;
-      if (agentDoc && agentDoc.name.toLowerCase().includes('vulnerable')) {
-        targetAgentName = 'BankingAgentVulnerable';
-      } else {
-        targetAgentName = 'BankingAgentSafe';
+      let targetAgentName: string = agentDoc.name;
+      if (agentDoc.integrationType === 'INTERNAL') {
+        if (agentDoc.name.toLowerCase().includes('vulnerable')) {
+          targetAgentName = 'BankingAgentVulnerable';
+        } else {
+          targetAgentName = 'BankingAgentSafe';
+        }
       }
       
       const report = reports.find((r: any) => r.agentVersion === targetAgentName);

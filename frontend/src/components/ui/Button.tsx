@@ -5,13 +5,13 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 export function Button({ children, variant = 'primary', className = '', ...props }: ButtonProps) {
-  const baseClasses = 'inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-full transition-all duration-150 ease-ui-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:opacity-50 disabled:pointer-events-none';
+  const baseClasses = 'inline-flex items-center justify-center px-4 py-1.5 text-[13px] font-medium rounded-md transition-all duration-150 ease-ui-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-safe disabled:opacity-50 disabled:pointer-events-none';
   
   const variants = {
-    primary: 'bg-zinc-100 text-zinc-950 hover:bg-white',
-    secondary: 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700 border border-zinc-700',
-    ghost: 'bg-transparent text-zinc-400 hover:text-zinc-100 hover:bg-white/5',
-    danger: 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20',
+    primary: 'bg-content-primary text-zinc-950 hover:bg-white',
+    secondary: 'bg-panel-hover text-content-primary hover:bg-border-strong border border-border-subtle',
+    ghost: 'bg-transparent text-content-secondary hover:text-content-primary hover:bg-panel-hover',
+    danger: 'bg-critical-muted text-critical hover:bg-critical/20 border border-critical/20',
   };
 
   return (

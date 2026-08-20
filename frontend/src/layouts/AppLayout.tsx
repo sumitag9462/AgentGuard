@@ -10,18 +10,18 @@ import {
 
 function Sidebar() {
   const navItems = [
-    { name: 'Dashboard', path: '/', icon: SquaresFour },
-    { name: 'Agents', path: '/agents', icon: Robot },
-    { name: 'Evaluations', path: '/evaluations', icon: TestTube },
-    { name: 'Scenarios', path: '/scenarios', icon: ListMagnifyingGlass },
+    { name: 'Dashboard', path: '/app', icon: SquaresFour },
+    { name: 'Agents', path: '/app/agents', icon: Robot },
+    { name: 'Evaluations', path: '/app/evaluations', icon: TestTube },
+    { name: 'Scenarios', path: '/app/scenarios', icon: ListMagnifyingGlass },
   ];
 
   return (
-    <div className="w-64 border-r border-white/5 bg-zinc-950/50 flex flex-col h-screen sticky top-0">
-      <div className="h-16 flex items-center px-6 border-b border-white/5">
+    <div className="w-64 border-r border-zinc-800 bg-zinc-950 flex flex-col h-screen sticky top-0 z-10">
+      <div className="h-16 flex items-center px-6 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <ShieldCheck weight="fill" className="text-emerald-500 w-6 h-6" />
-          <span className="font-semibold tracking-tight text-zinc-100">AgentGuard</span>
+          <span className="font-semibold tracking-tight text-zinc-100">AgentEval</span>
         </div>
       </div>
       
@@ -47,7 +47,7 @@ function Sidebar() {
         ))}
       </div>
 
-      <div className="p-4 border-t border-white/5">
+      <div className="p-4 border-t border-zinc-800">
         <button className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30 transition-all duration-200 ease-ui-out">
           <Gear className="w-5 h-5" />
           Settings
@@ -59,9 +59,9 @@ function Sidebar() {
 
 export default function AppLayout() {
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-50 font-sans flex selection:bg-emerald-500/30">
+    <div className="min-h-screen bg-zinc-950 text-zinc-50 font-sans flex selection:bg-emerald-500/30">
       <Sidebar />
-      <main className="flex-1 flex flex-col overflow-y-auto">
+      <main className="flex-1 flex flex-col overflow-y-auto relative z-0">
         <div className="flex-1 p-8 max-w-7xl mx-auto w-full">
           <Outlet />
         </div>

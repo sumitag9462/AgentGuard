@@ -1,86 +1,142 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { getIo } from '../index';
+import os from 'os';
+// import { getIo } from '../index'; // Removed to avoid starting server on import
 
-export const runPythonEvaluation = async (evaluationId: string, runId: string) => {
+
+/**
+ * Run the Python AI engine pipeline with the given configuration.
+ * 
+ * Modes:
+ * - evaluate: Run full evaluation pipeline
+ * - generate-scenarios: Generate scenarios only
+ * - adaptive: Run adaptive testing on previous results
+ */
+export const runPythonPipeline = async (
+  mode: 'evaluate' | 'generate-scenarios' | 'adaptive' | 'evaluate-external' | 'evaluate-traces',
+  agentConfig: Record<string, any>,
+  options: {
+    evaluationId?: string;
+    runId?: string;
+    count?: number;
+    previousResults?: any[];
+    scenariosPath?: string;
+  } = {}
+): Promise<any> => {
   return new Promise((resolve, reject) => {
-    // Resolve paths relative to this file's location in the source tree.
-    // In dev mode (tsx), __dirname is backend/src/services/
-    // In compiled mode, __dirname is backend/dist/services/
-    // ai-engine is always a sibling of backend/ at the repo root.
-    const aiEnginePath = path.resolve(__dirname, '../../../ai-engine');
-    const pythonScriptPath = path.join(aiEnginePath, 'pipeline.py');
-
-    // Use the project virtual environment Python interpreter
-    const venvPythonUnix = path.join(aiEnginePath, 'venv', 'bin', 'python');
-    const venvPythonWin = path.join(aiEnginePath, 'venv', 'Scripts', 'python.exe');
-
-    let pythonExecutable: string;
-    if (fs.existsSync(venvPythonUnix)) {
-      pythonExecutable = venvPythonUnix;
-    } else if (fs.existsSync(venvPythonWin)) {
-      pythonExecutable = venvPythonWin;
-    } else {
-      // Fallback to system python3 only if venv not found
-      console.warn('Warning: ai-engine venv not found, falling back to system python3');
-      pythonExecutable = 'python3';
+    const pythonScriptPath = path.resolve(__dirname, '../../../ai-engine/pipeline.py');
+    
+    // Write agent config to temp file so Python can read it
+    const tmpDir = os.tmpdir();
+    const configPath = path.join(tmpDir, `agenteval_config_${Date.now()}.json`);
+    fs.writeFileSync(configPath, JSON.stringify(agentConfig));
+    
+    // Build command args
+    const args = [pythonScriptPath, '--config', configPath, '--mode', mode];
+    
+    if (options.count) {
+      args.push('--count', String(options.count));
     }
-
-    console.log(`[pythonRunner] Using Python: ${pythonExecutable}`);
-    console.log(`[pythonRunner] Script: ${pythonScriptPath}`);
-    console.log(`[pythonRunner] CWD: ${aiEnginePath}`);
-
-    const pythonProcess = spawn(pythonExecutable, [pythonScriptPath, '--cached'], {
-      cwd: aiEnginePath
+    
+    if (mode === 'evaluate' || mode === 'generate-scenarios') {
+      args.push('--generate');
+    }
+    
+    if (mode === 'adaptive' && options.previousResults) {
+      const prevResultsPath = path.join(tmpDir, `agenteval_prev_${Date.now()}.json`);
+      fs.writeFileSync(prevResultsPath, JSON.stringify(options.previousResults));
+      args.push('--previous-results', prevResultsPath);
+    }
+    
+    if (options.scenariosPath) {
+      args.push('--scenarios', options.scenariosPath);
+    }
+    
+    const outputPath = path.join(tmpDir, `agenteval_output_${Date.now()}.json`);
+    args.push('--output', outputPath);
+    
+    console.log(`Running Python pipeline: python3 ${args.join(' ')}`);
+    
+    const pythonProcess = spawn('python3', args, {
+      cwd: path.dirname(pythonScriptPath),
+      env: { ...process.env }
     });
-
+    
     let stdoutData = '';
     let stderrData = '';
+    
+    // Lazy load getIo to prevent index.ts from starting the server in CLI mode
+    let io: any = { emit: () => {} };
+    if (!process.env.CLI_MODE) {
+      try {
+        const { getIo } = require('../index');
+        io = getIo();
+      } catch (e) {
+        // Fallback for CLI
+      }
+    }
 
-    const io = getIo();
-
+    const runId = options.runId || 'unknown';
+    
     pythonProcess.stdout.on('data', (data) => {
       const output = data.toString();
       stdoutData += output;
-      
-      // Parse for live events
-      const lines = output.split('\n');
-      for (const line of lines) {
-        try {
-          if (line.trim().startsWith('{"event"')) {
-            const parsed = JSON.parse(line.trim());
-            io.emit(parsed.event, { runId, ...parsed });
-          }
-        } catch (e) {
-          // ignore parsing errors for normal text lines
-        }
-      }
-      
-      // Stream raw logs to frontend
       io.emit('evaluation_log', { runId, type: 'stdout', message: output });
     });
-
+    
     pythonProcess.stderr.on('data', (data) => {
       const output = data.toString();
       stderrData += output;
       io.emit('evaluation_log', { runId, type: 'stderr', message: output });
     });
-
+    
     pythonProcess.on('close', (code) => {
+      // Clean up temp config file
+      try { fs.unlinkSync(configPath); } catch {}
+      
       if (code === 0) {
-        resolve(stdoutData);
+        // Try to parse the JSON output
+        try {
+          const startMarker = '---AGENTEVAL_OUTPUT_JSON_START---';
+          const endMarker = '---AGENTEVAL_OUTPUT_JSON_END---';
+          
+          const startIndex = stdoutData.indexOf(startMarker);
+          const endIndex = stdoutData.indexOf(endMarker);
+          
+          if (startIndex !== -1 && endIndex !== -1) {
+            const jsonStr = stdoutData.substring(startIndex + startMarker.length, endIndex).trim();
+            const result = JSON.parse(jsonStr);
+            resolve(result);
+          } else if (fs.existsSync(outputPath)) {
+            // Fallback: read from output file
+            const result = JSON.parse(fs.readFileSync(outputPath, 'utf-8'));
+            try { fs.unlinkSync(outputPath); } catch {}
+            resolve(result);
+          } else {
+            resolve({ raw: stdoutData });
+          }
+        } catch (parseErr) {
+          console.error('Failed to parse Python output:', parseErr);
+          resolve({ raw: stdoutData, parseError: String(parseErr) });
+        }
       } else {
         const errorMsg = `Python script exited with code ${code}.\nEvaluation: ${evaluationId}\nStderr: ${stderrData.slice(0, 2000)}`;
         console.error(`[pythonRunner] ${errorMsg}`);
         reject(new Error(errorMsg));
       }
     });
-
+    
     pythonProcess.on('error', (err) => {
-      const errorMsg = `Failed to spawn Python process: ${err.message}`;
-      console.error(`[pythonRunner] ${errorMsg}`);
-      reject(new Error(errorMsg));
+      try { fs.unlinkSync(configPath); } catch {}
+      reject(new Error(`Failed to spawn Python process: ${err.message}`));
     });
   });
+};
+
+// Legacy compat
+export const runPythonEvaluation = async (evaluationId: string, runId: string) => {
+  // This legacy method is kept for backward compatibility but
+  // new code should use runPythonPipeline directly
+  return runPythonPipeline('evaluate', {}, { evaluationId, runId });
 };

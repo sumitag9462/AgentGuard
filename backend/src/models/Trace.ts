@@ -32,4 +32,7 @@ const TraceSchema: Schema = new Schema({
   events: [TraceEventSchema]
 });
 
+TraceSchema.index({ evaluationId: 1 });
+TraceSchema.index({ testId: 1 });
+
 export const Trace = mongoose.model<ITrace>('Trace', TraceSchema);

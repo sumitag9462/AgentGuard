@@ -2,57 +2,36 @@ import type { Agent, Evaluation, Trace, Failure, Scenario } from '../types';
 
 const API_BASE_URL = 'http://localhost:4000/api';
 
-async function handleResponse(res: Response) {
+class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${url}`, options);
   if (!res.ok) {
-    let errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
-    try {
-      const errorData = await res.json();
-      if (errorData && errorData.error) {
-        errorMsg = errorData.error;
-      }
-    } catch {
-      // Body not JSON
-    }
-    throw new Error(errorMsg);
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiError(body.error || res.statusText, res.status);
   }
   return res.json();
 }
 
-export const fetchAgents = async (): Promise<Agent[]> => {
-  const res = await fetch(`${API_BASE_URL}/agents`);
-  return handleResponse(res);
-};
+export const fetchAgents = () => apiFetch<Agent[]>('/agents');
+export const fetchEvaluations = () => apiFetch<Evaluation[]>('/evaluations');
+export const fetchEvaluationDetails = (id: string) => apiFetch<Evaluation>(`/evaluations/${id}`);
+export const fetchFailures = (evaluationId: string) => apiFetch<Failure[]>(`/evaluations/${evaluationId}/failures`);
+export const fetchTrace = (testId: string) => apiFetch<Trace>(`/traces/${testId}`);
+export const fetchScenarios = () => apiFetch<Scenario[]>('/scenarios');
 
-export const fetchEvaluations = async (): Promise<Evaluation[]> => {
-  const res = await fetch(`${API_BASE_URL}/evaluations`);
-  return handleResponse(res);
-};
-
-export const fetchEvaluationDetails = async (id: string): Promise<Evaluation> => {
-  const res = await fetch(`${API_BASE_URL}/evaluations/${id}`);
-  return handleResponse(res);
-};
-
-export const fetchFailures = async (evaluationId: string): Promise<Failure[]> => {
-  const res = await fetch(`${API_BASE_URL}/evaluations/${evaluationId}/failures`);
-  return handleResponse(res);
-};
-
-export const fetchTrace = async (testId: string): Promise<Trace> => {
-  const res = await fetch(`${API_BASE_URL}/traces/${testId}`);
-  return handleResponse(res);
-};
-
-export const fetchScenarios = async (): Promise<Scenario[]> => {
-  const res = await fetch(`${API_BASE_URL}/scenarios`);
-  return handleResponse(res);
-};
-
-export const runEvaluation = async (agentId: string, version: string): Promise<Evaluation> => {
-  const res = await fetch(`${API_BASE_URL}/evaluations`, {
+export const runEvaluation = (agentId: string, version: string) =>
+  apiFetch<Evaluation>('/evaluations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ agentId, version })
   });
-  return handleResponse(res);
-};
+
+export { ApiError };

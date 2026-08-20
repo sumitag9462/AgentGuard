@@ -1,0 +1,63 @@
+name: AgentEval Quality Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'agents/**'
+      - 'system-prompts/**'
+      - 'tools/**'
+
+jobs:
+  evaluate-agent:
+    runs-on: ubuntu-latest
+    
+    services:
+      mongodb:
+        image: mongo:6.0
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7.0
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Python Dependencies
+        run: |
+          cd ai-engine
+          pip install -r requirements.txt
+
+      - name: Install Node Dependencies
+        run: |
+          cd backend
+          npm install
+
+      - name: Run AgentEval Quality Gate
+        env:
+          MONGODB_URI: mongodb://localhost:27017/agenteval
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          cd backend
+          # In a real environment, you might extract the agentId from the PR diff
+          # For this template, we assume the target agent is passed as an env var or arg
+          AGENT_ID="agt-demo-001"
+          
+          echo "Running AgentEval Quality Gate for Agent: $AGENT_ID"
+          npm run ci:eval -- --agentId $AGENT_ID --count 20

@@ -24,6 +24,7 @@ export default function EvaluationDetails() {
   const { data: agent } = useSWR<any>(evaluation ? `/agents/${evaluation.agentId}` : null, fetcher);
   
   const { data: failures } = useSWR<Failure[]>(`/evaluations/${id}/failures`, fetcher);
+  
 
   const handleAdaptiveTesting = async () => {
     setIsAdaptiveRunning(true);

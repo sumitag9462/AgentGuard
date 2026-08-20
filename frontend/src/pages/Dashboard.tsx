@@ -4,6 +4,7 @@ import { Card, CardHeader } from '../components/ui/Card';
 import { Table, TableHead, TableHeader, TableBody, TableRow, TableCell } from '../components/ui/Table';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
+import { RiskPredictionWidget } from '../components/ui/RiskPredictionWidget';
 import { useNavigate } from 'react-router-dom';
 import useSWR from 'swr';
 import api, { fetcher } from '../services/apiClient';
@@ -25,6 +26,7 @@ export default function Dashboard() {
   const scorecard = latestEval?.scorecard;
   const qualityGate = latestEval?.qualityGate;
   const activeAgent = agents?.find(a => a.agentId === latestEval?.agentId) || agents?.[0];
+  const { data: predictionData } = useSWR(activeAgent ? "/agents/" + activeAgent.agentId + "/risk-predictions" : null, fetcher);
 
   const handleRunEvaluation = async () => {
     const defaultAgentId = activeAgent?.agentId || 'agt-001';
@@ -142,6 +144,10 @@ export default function Dashboard() {
           </div>
         </Card>
       </motion.div>
+
+      <div className="mb-6">
+        <RiskPredictionWidget predictions={predictionData?.predictions || []} />
+      </div>
 
       {/* Grid: Risk & Dimensions */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

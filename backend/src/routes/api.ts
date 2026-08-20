@@ -1078,4 +1078,160 @@ router.get('/agents/:id/attack-surface', async (req, res) => {
   }
 });
 
+// --- FAILURE RISK PREDICTION & EVALUATION INTELLIGENCE ---
+
+router.get('/agents/:id/risk-predictions', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const failures = await Failure.find({ agentId: id }).sort({ timestamp: -1 });
+    const evals = await Evaluation.find({ agentId: id, status: 'COMPLETED' }).sort({ timestamp: -1 });
+
+    if (evals.length === 0 || failures.length === 0) {
+      return res.json({
+        predictions: [],
+        confidence: 'LOW',
+        message: 'Insufficient historical data for failure prediction.'
+      });
+    }
+
+    const categoryStats: Record<string, { count: number, highSev: number, recentCount: number, oldCount: number }> = {};
+    
+    // Split failures into recent (latest eval) vs older to compute trend
+    const latestEvalId = evals[0]._id.toString();
+    
+    for (const f of failures) {
+      if (!f.category) continue;
+      if (!categoryStats[f.category]) categoryStats[f.category] = { count: 0, highSev: 0, recentCount: 0, oldCount: 0 };
+      
+      categoryStats[f.category].count++;
+      if (f.severity === 'HIGH' || f.severity === 'CRITICAL') {
+        categoryStats[f.category].highSev++;
+      }
+      if (f.evaluationId === latestEvalId) {
+        categoryStats[f.category].recentCount++;
+      } else {
+        categoryStats[f.category].oldCount++;
+      }
+    }
+
+    const predictions = [];
+    for (const [category, stats] of Object.entries(categoryStats)) {
+      // Heuristic risk score
+      let riskScore = Math.min(100, Math.floor((stats.count * 3) + (stats.highSev * 10) + (stats.recentCount * 8)));
+      
+      let confidence = 'LOW';
+      if (evals.length >= 3 && stats.count >= 5) confidence = 'HIGH';
+      else if (evals.length >= 2 || stats.count >= 3) confidence = 'MEDIUM';
+      
+      let level = 'LOW';
+      if (riskScore >= 75) level = 'HIGH';
+      else if (riskScore >= 50) level = 'MEDIUM';
+      else if (riskScore < 25) level = 'LOW';
+
+      let trend = '→ stable';
+      if (stats.recentCount > 0 && stats.oldCount === 0) trend = '↑ increasing';
+      else if (stats.recentCount === 0 && stats.oldCount > 0) trend = '↓ improving';
+      else if (stats.recentCount > Math.ceil(stats.oldCount / Math.max(1, evals.length - 1))) trend = '↑ increasing';
+      else if (stats.recentCount < Math.floor(stats.oldCount / Math.max(1, evals.length - 1))) trend = '↓ improving';
+
+      const evidence = [
+        `${stats.count} total historical failures`,
+        `${stats.highSev} high/critical severity failures`,
+        `Failure pattern observed across ${evals.length} evaluations`
+      ];
+
+      predictions.push({
+        category,
+        riskScore,
+        level,
+        confidence,
+        trend,
+        evidence
+      });
+    }
+
+    predictions.sort((a, b) => b.riskScore - a.riskScore);
+
+    res.json({ predictions, confidence: evals.length > 2 ? 'HIGH' : 'MEDIUM' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate risk predictions' });
+  }
+});
+
+router.get('/agents/:id/failure-hotspots', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const failures = await Failure.find({ agentId: id });
+    
+    const hotspots: Record<string, any> = {};
+    for (const f of failures) {
+      const key = f.category || f.failureType || 'Unknown';
+      if (!hotspots[key]) {
+        hotspots[key] = { name: key, count: 0, severity: 'LOW' };
+      }
+      hotspots[key].count++;
+      if (f.severity === 'CRITICAL') hotspots[key].severity = 'CRITICAL';
+      else if (f.severity === 'HIGH' && hotspots[key].severity !== 'CRITICAL') hotspots[key].severity = 'HIGH';
+      else if (f.severity === 'MEDIUM' && hotspots[key].severity === 'LOW') hotspots[key].severity = 'MEDIUM';
+    }
+
+    const hotspotList = Object.values(hotspots).sort((a, b) => b.count - a.count);
+    res.json(hotspotList);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load failure hotspots' });
+  }
+});
+
+router.get('/agents/:id/test-recommendations', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const failures = await Failure.find({ agentId: id }).sort({ timestamp: -1 });
+    const evals = await Evaluation.find({ agentId: id, status: 'COMPLETED' }).sort({ timestamp: -1 });
+
+    const categoryStats: Record<string, { count: number, highSev: number, recentCount: number }> = {};
+    const latestEvalId = evals.length > 0 ? evals[0]._id.toString() : '';
+    
+    for (const f of failures) {
+      if (!f.category) continue;
+      if (!categoryStats[f.category]) categoryStats[f.category] = { count: 0, highSev: 0, recentCount: 0 };
+      categoryStats[f.category].count++;
+      if (f.severity === 'HIGH' || f.severity === 'CRITICAL') categoryStats[f.category].highSev++;
+      if (f.evaluationId === latestEvalId) categoryStats[f.category].recentCount++;
+    }
+
+    const recommendations = [];
+    for (const [category, stats] of Object.entries(categoryStats)) {
+      let riskScore = Math.min(100, Math.floor((stats.count * 3) + (stats.highSev * 10) + (stats.recentCount * 8)));
+      if (riskScore >= 75) {
+        recommendations.push({
+          category,
+          scenarioCount: 25,
+          priority: 1,
+          reason: `High historical failure rate with ${stats.highSev} critical incidents.`
+        });
+      } else if (riskScore >= 50) {
+        recommendations.push({
+          category,
+          scenarioCount: 15,
+          priority: 2,
+          reason: `Persistent medium risk with ${stats.count} past failures.`
+        });
+      }
+    }
+
+    if (recommendations.length === 0) {
+      recommendations.push(
+        { category: 'Prompt Injection', scenarioCount: 15, priority: 2, reason: 'Standard adversarial baseline' },
+        { category: 'Goal Drift', scenarioCount: 10, priority: 3, reason: 'Standard robustness check' }
+      );
+    }
+    
+    recommendations.sort((a, b) => a.priority - b.priority);
+
+    res.json(recommendations);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate test recommendations' });
+  }
+});
+
 export default router;

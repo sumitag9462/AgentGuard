@@ -6,12 +6,14 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../services/apiClient';
 import { 
   HardDrives, Plugs, Heartbeat, ShieldWarning, Key, Link as LinkIcon, 
-  CheckCircle, ArrowRight, ArrowLeft, Spinner, Database, Shield
+  CheckCircle, ArrowRight, ArrowLeft, Spinner, Database, Shield,
+  IdentificationCard
 } from '@phosphor-icons/react';
 import type { AgentIntegration } from '../../types';
 
 // Steps definition
 const STEPS = [
+  { id: 'basic_info', title: 'Basic Info', icon: IdentificationCard },
   { id: 'type', title: 'Integration Type', icon: HardDrives },
   { id: 'endpoint', title: 'Endpoint Config', icon: LinkIcon },
   { id: 'test', title: 'Connection Test', icon: Heartbeat },
@@ -24,6 +26,12 @@ const STEPS = [
 export default function ConnectAgent() {
   const navigate = useNavigate();
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [agentInfo, setAgentInfo] = useState({
+    name: "Demo Agent (External)",
+    description: "External HTTP agent created via Connect Wizard",
+    domain: "General",
+    systemPrompt: "You are a helpful AI agent.\nPOLICY: Prioritize safety over task completion."
+  });
   const [integration, setIntegration] = useState<Partial<AgentIntegration>>({
     type: 'HTTP',
     method: 'POST',
@@ -51,18 +59,18 @@ export default function ConnectAgent() {
     try {
       // Actually create the agent in the backend!
       const res = await api.post('/agents', {
-        name: "Demo Agent (External)",
-        description: "External HTTP agent created via Connect Wizard",
-        domain: "General",
+        name: agentInfo.name,
+        description: agentInfo.description,
+        domain: agentInfo.domain,
         provider: "OpenAI",
-        systemPrompt: "You are a helpful AI agent.\nPOLICY: Prioritize safety over task completion.",
+        systemPrompt: agentInfo.systemPrompt,
         tools: [],
         policies: [],
         maxToolCalls: 10,
         qualityGate: { minReliability: 80, maxCriticalFailures: 0, minSafetyScore: 85 }
       });
       
-      const agentId = res.data._id || res.data.id || res.data.agentId;
+      const agentId = res.data.agentId || res.data._id || res.data.id;
       
       // Update integration settings
       await api.put(`/agents/${agentId}/integration`, {
@@ -126,7 +134,7 @@ export default function ConnectAgent() {
                 </div>
               </div>
             );
-  )}
+          })}
         </div>
       </div>
       
@@ -149,6 +157,7 @@ export default function ConnectAgent() {
                 <div className="mb-8">
                   <h1 className="text-3xl font-bold tracking-tight mb-2 text-content-primary">{currentStep.title}</h1>
                   <p className="text-content-secondary">
+                    {currentStep.id === 'basic_info' && "Provide the fundamental details of your AI agent."}
                     {currentStep.id === 'type' && "Select how AgentGuard should interface with your agent."}
                     {currentStep.id === 'endpoint' && "Configure the network details and authentication."}
                     {currentStep.id === 'test' && "Let's verify we can reach the agent."}
@@ -161,6 +170,7 @@ export default function ConnectAgent() {
                 
                 {/* Content */}
                 <div className="glass-panel">
+                  {currentStep.id === 'basic_info' && <StepBasicInfo agentInfo={agentInfo} setAgentInfo={setAgentInfo} />}
                   {currentStep.id === 'type' && <StepIntegrationType integration={integration} setIntegration={setIntegration} />}
                   {currentStep.id === 'endpoint' && <StepEndpointConfig integration={integration} setIntegration={setIntegration} />}
                   {currentStep.id === 'test' && <StepConnectionTest integration={integration} />}
@@ -499,6 +509,53 @@ function StepAttackSurface() {
       
       <div className="text-[13px] text-content-secondary p-4 bg-panel rounded-md border border-border-subtle">
         <p>AgentEval will run an adaptive test suite targeting prompt injection, goal drift, and tool misuse specifically designed for this integration.</p>
+      </div>
+    </div>
+  );
+}
+
+function StepBasicInfo({ agentInfo, setAgentInfo }: any) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-content-primary mb-1">Agent Name</label>
+        <input 
+          type="text" 
+          value={agentInfo.name}
+          onChange={e => setAgentInfo({...agentInfo, name: e.target.value})}
+          className="w-full px-3 py-2 bg-canvas border border-border-subtle rounded-md text-content-primary focus:outline-none focus:border-safe transition-colors"
+          placeholder="e.g. Customer Support Bot"
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-content-primary mb-1">Description</label>
+        <input 
+          type="text" 
+          value={agentInfo.description}
+          onChange={e => setAgentInfo({...agentInfo, description: e.target.value})}
+          className="w-full px-3 py-2 bg-canvas border border-border-subtle rounded-md text-content-primary focus:outline-none focus:border-safe transition-colors"
+          placeholder="Briefly describe what this agent does"
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-content-primary mb-1">Domain</label>
+        <input 
+          type="text" 
+          value={agentInfo.domain}
+          onChange={e => setAgentInfo({...agentInfo, domain: e.target.value})}
+          className="w-full px-3 py-2 bg-canvas border border-border-subtle rounded-md text-content-primary focus:outline-none focus:border-safe transition-colors"
+          placeholder="e.g. Finance, Healthcare, General"
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-content-primary mb-1">System Prompt</label>
+        <textarea 
+          value={agentInfo.systemPrompt}
+          onChange={e => setAgentInfo({...agentInfo, systemPrompt: e.target.value})}
+          rows={4}
+          className="w-full px-3 py-2 bg-canvas border border-border-subtle rounded-md text-content-primary focus:outline-none focus:border-safe resize-none transition-colors"
+          placeholder="Enter the system instructions given to the agent..."
+        />
       </div>
     </div>
   );

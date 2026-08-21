@@ -4,6 +4,7 @@ import { Evaluation, Agent, Scenario, Failure, Trace, TestSuite } from '../model
 import crypto from 'crypto';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
+import { eventBus } from '../services/eventBus';
 
 const AgentSchema = z.object({
   body: z.object({
@@ -186,6 +187,7 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
     }
     
     const runId = `GEN-${crypto.randomInt(1000, 9999)}`;
+    const batchId = runId;
     
     // Create a placeholder evaluation to track the generation
     const newEval = new Evaluation({
@@ -207,6 +209,12 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
     // Run in background
     setTimeout(async () => {
       try {
+        // Set generating status
+        await Agent.findOneAndUpdate(
+          { agentId: agent.agentId },
+          { scenarioGenerationStatus: 'GENERATING' }
+        );
+        
         const payload = await runPythonPipeline('generate-scenarios', {
           agentId: agent.agentId,
           name: agent.name,
@@ -232,18 +240,44 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
             severity: sc.severity,
             scenario: sc.userInput,
             expectedBehavior: sc.expectedBehavior,
-            rule: sc.evaluationRule
+            rule: sc.evaluationRule,
+            allowedActions: sc.allowedActions || [],
+            forbiddenActions: sc.forbiddenActions || [],
+            expectedToolCalls: sc.expectedToolCalls || [],
+            forbiddenToolCalls: sc.forbiddenToolCalls || [],
+            expectedFinalOutcome: sc.expectedFinalOutcome || '',
+            attackObjective: sc.attackObjective || '',
+            riskLevel: sc.riskLevel || 'LOW',
+            batchId
           });
           await newScenario.save();
         }
         
+        // Update agent with active batch info
+        const totalScenarios = await Scenario.countDocuments({ agentId: agent.agentId });
+        await Agent.findOneAndUpdate(
+          { agentId: agent.agentId },
+          {
+            activeBatchId: batchId,
+            scenarioGenerationStatus: 'READY',
+            scenarioCount: totalScenarios
+          }
+        );
+        
         newEval.status = 'COMPLETED';
         await newEval.save();
+        
+        eventBus.emit('evaluation_log', { agentId: agent.agentId, type: 'complete', message: `Generated ${scenarios.length} scenarios` });
       } catch (err: any) {
         console.error('Generation failed:', err);
         newEval.status = 'FAILED';
         (newEval as any).error = err.message;
         await newEval.save();
+        
+        await Agent.findOneAndUpdate(
+          { agentId: agent.agentId },
+          { scenarioGenerationStatus: 'FAILED' }
+        );
       }
     }, 100);
     
@@ -457,6 +491,118 @@ router.get('/evaluations/:id', async (req, res) => {
   }
 });
 
+// GET per-scenario results for an evaluation (all scenarios, passed + failed)
+router.get('/evaluations/:id/results', async (req, res) => {
+  try {
+    const id = req.params.id;
+    let evalRun;
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      evalRun = await Evaluation.findById(id);
+    }
+    if (!evalRun) {
+      evalRun = await Evaluation.findOne({ runId: id });
+    }
+    if (!evalRun) return res.status(404).json({ error: 'Evaluation not found' });
+    
+    const evalId = evalRun._id.toString();
+    
+    // Fetch all traces and failures for this evaluation
+    const traces = await Trace.find({ evaluationId: evalId });
+    const failures = await Failure.find({ evaluationId: evalId });
+    
+    // Build a failure lookup by testId
+    const failureMap = new Map<string, any>();
+    for (const f of failures) {
+      failureMap.set(f.testId, f);
+    }
+    
+    // Build a trace lookup by testId
+    const traceMap = new Map<string, any>();
+    for (const t of traces) {
+      traceMap.set(t.testId, t);
+    }
+    
+    // Get the scenario reference list — prefer scenarioSnapshot, fall back to scenarioIds
+    const scenarioSnapshot = evalRun.scenarioSnapshot || [];
+    const scenarioIds = evalRun.scenarioIds || [];
+    
+    // If we have a snapshot, use it (immutable). Otherwise, look up scenarios by ID.
+    let scenarioList: any[];
+    if (scenarioSnapshot.length > 0) {
+      scenarioList = scenarioSnapshot;
+    } else if (scenarioIds.length > 0) {
+      // Fall back to looking up current scenario docs (for historical evals without snapshots)
+      const scenarios = await Scenario.find({ scenarioId: { $in: scenarioIds } }).lean();
+      scenarioList = scenarios.map(s => ({
+        scenarioId: s.scenarioId,
+        category: s.category,
+        severity: s.severity,
+        scenario: s.scenario,
+        expectedBehavior: s.expectedBehavior,
+        rule: s.rule
+      }));
+    } else {
+      // No scenario reference — use traces as the basis
+      scenarioList = traces.map(t => ({ scenarioId: t.testId }));
+    }
+    
+    // Build unified results
+    const results = scenarioList.map(sc => {
+      const testId = sc.scenarioId || sc.testId;
+      const failure = failureMap.get(testId);
+      const trace = traceMap.get(testId);
+      
+      if (failure) {
+        return {
+          scenarioId: testId,
+          category: sc.category || failure.category || 'N/A',
+          severity: sc.severity || failure.severity || 'LOW',
+          status: failure.failureType === 'INFRASTRUCTURE_ERROR' || failure.failureType === 'EXECUTION_ERROR'
+            ? 'INFRASTRUCTURE_ERROR'
+            : failure.failureType === 'TIMEOUT' ? 'TIMEOUT' : 'FAIL',
+          expected: sc.expectedBehavior || failure.expectedBehavior || '',
+          actual: failure.actualBehavior || '',
+          failureCategory: failure.failureType || '',
+          rootCause: failure.rootCause || '',
+          recommendations: failure.recommendation ? [failure.recommendation] : [],
+          confidence: failure.riskScore || null,
+          traceId: trace?.traceId || null,
+          hasTrace: !!trace
+        };
+      } else {
+        return {
+          scenarioId: testId,
+          category: sc.category || 'N/A',
+          severity: sc.severity || 'LOW',
+          status: 'PASS',
+          expected: sc.expectedBehavior || '',
+          actual: 'Scenario passed all checks.',
+          failureCategory: null,
+          rootCause: null,
+          recommendations: [],
+          confidence: null,
+          traceId: trace?.traceId || null,
+          hasTrace: !!trace
+        };
+      }
+    });
+    
+    res.json({
+      evaluationId: evalId,
+      runId: evalRun.runId,
+      status: evalRun.status,
+      totalScenarios: results.length,
+      passed: results.filter(r => r.status === 'PASS').length,
+      failed: results.filter(r => r.status === 'FAIL').length,
+      infrastructureErrors: results.filter(r => r.status === 'INFRASTRUCTURE_ERROR').length,
+      timeouts: results.filter(r => r.status === 'TIMEOUT').length,
+      results
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch evaluation results' });
+  }
+});
+
 // POST trigger new evaluation
 router.post('/evaluations', validate(EvaluationRequestSchema), async (req, res) => {
   try {
@@ -466,18 +612,63 @@ router.post('/evaluations', validate(EvaluationRequestSchema), async (req, res) 
     const agent = await Agent.findOne({ agentId });
     if (!agent) return res.status(404).json({ error: `Agent ${agentId} not found` });
     
+    // ENFORCEMENT (§2): API-layer scenario count check
+    const scenarioCount = await Scenario.countDocuments({ agentId });
+    if (scenarioCount === 0) {
+      return res.status(409).json({
+        error: 'Evaluation cannot start because this agent has no generated test scenarios. Generate scenarios first.'
+      });
+    }
+    
+    // Fetch scenarios for immutable snapshot
+    const scenarios = await Scenario.find({ agentId }).lean();
+    const scenarioIds = scenarios.map(s => s.scenarioId);
+    const scenarioSnapshot = scenarios.map(s => ({
+      scenarioId: s.scenarioId,
+      category: s.category,
+      severity: s.severity,
+      scenario: s.scenario,
+      expectedBehavior: s.expectedBehavior,
+      forbiddenActions: s.forbiddenActions || [],
+      forbiddenToolCalls: s.forbiddenToolCalls || [],
+      expectedToolCalls: s.expectedToolCalls || [],
+      allowedActions: s.allowedActions || [],
+      rule: s.rule,
+      attackObjective: s.attackObjective || '',
+      riskLevel: s.riskLevel || 'LOW',
+      title: s.title || '',
+      difficulty: s.difficulty || 'MEDIUM'
+    }));
+    
+    // Build agent config snapshot for reproducibility
+    const agentConfigSnapshot = {
+      agentId: agent.agentId,
+      name: agent.name,
+      version: version || agent.latestVersion,
+      domain: agent.domain,
+      systemPrompt: agent.systemPrompt,
+      tools: agent.tools,
+      policies: agent.policies,
+      prohibitedActions: agent.prohibitedActions || [],
+      qualityGate: agent.qualityGate || {}
+    };
+    
     const runId = `RUN-${crypto.randomInt(1000, 9999)}`;
     const newEval = new Evaluation({
       runId,
       agentId,
       version: version || agent.latestVersion,
       status: 'PENDING',
-      timestamp: new Date()
+      timestamp: new Date(),
+      scenarioIds,
+      scenarioSnapshot,
+      agentConfigSnapshot,
+      totalScenarios: scenarioIds.length
     });
     
     await newEval.save();
     
-    // Queue job — include agentId and version so the worker knows which agent to evaluate
+    // Queue job
     await evaluationQueue.add('run-evaluation', {
       evaluationId: newEval._id,
       runId: newEval.runId,

@@ -112,6 +112,10 @@ export interface IEvaluation extends Document {
   report: Record<string, any>;
   // Scenarios used
   scenarioIds: string[];
+  // Immutable snapshot of full scenario content at evaluation time.
+  // NOTE: MongoDB has a 16MB document cap. If scenario counts reach hundreds,
+  // consider moving this to a separate collection.
+  scenarioSnapshot: Array<Record<string, any>>;
   isAdaptive: boolean;
 }
 
@@ -142,6 +146,10 @@ const EvaluationSchema: Schema = new Schema({
   recommendations: [{ type: Schema.Types.Mixed }],
   report: { type: Schema.Types.Mixed, default: {} },
   scenarioIds: [{ type: String }],
+  // Immutable snapshot of full scenario content at evaluation time.
+  // NOTE: MongoDB 16MB document limit applies. For large scenario sets,
+  // consider a separate ScenarioSnapshot collection.
+  scenarioSnapshot: [{ type: Schema.Types.Mixed }],
   isAdaptive: { type: Boolean, default: false }
 });
 

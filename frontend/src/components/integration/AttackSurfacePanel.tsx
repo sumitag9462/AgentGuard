@@ -116,7 +116,7 @@ export function AttackSurfacePanel({ attackSurface }: Props) {
                             {tool.testCategories && tool.testCategories.length > 0 ? (
                               <div className="flex flex-wrap gap-2">
                                 {tool.testCategories.map(cat => (
-                                  <Badge key={cat} variant="outline" className="text-xs">{cat}</Badge>
+                                  <Badge key={cat} variant="default" className="text-xs">{cat}</Badge>
                                 ))}
                               </div>
                             ) : (

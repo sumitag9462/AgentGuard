@@ -22,6 +22,7 @@ export interface IScenario extends Document {
   isAdaptive: boolean;
   round: number;
   suiteId: string;
+  batchId: string;
   createdAt: Date;
 }
 
@@ -47,10 +48,12 @@ const ScenarioSchema: Schema = new Schema({
   isAdaptive: { type: Boolean, default: false },
   round: { type: Number, default: 1 },
   suiteId: { type: String, default: '' },
+  batchId: { type: String, default: '' },
   createdAt: { type: Date, default: Date.now }
 });
 
 ScenarioSchema.index({ agentId: 1, createdAt: -1 });
 ScenarioSchema.index({ category: 1, severity: 1 });
+ScenarioSchema.index({ agentId: 1, batchId: 1 });
 
 export const Scenario = mongoose.model<IScenario>('Scenario', ScenarioSchema);

@@ -75,6 +75,9 @@ export interface IAgent extends Document {
   integration?: IAgentIntegration;
   connectionStatus?: ConnectionStatus;
   lastHealthCheck?: Date;
+  activeBatchId?: string;
+  scenarioGenerationStatus?: 'NOT_GENERATED' | 'GENERATING' | 'READY' | 'FAILED';
+  scenarioCount?: number;
 }
 
 const ToolSchemaDefinition = new Schema({
@@ -153,6 +156,13 @@ const AgentSchema: Schema = new Schema({
     enum: ['CONNECTED', 'DEGRADED', 'AUTH_FAILED', 'UNREACHABLE', 'TELEMETRY_DISCONNECTED', 'INVALID_CONFIG', 'DISABLED'],
   },
   lastHealthCheck: { type: Date },
+  activeBatchId: { type: String },
+  scenarioGenerationStatus: {
+    type: String,
+    enum: ['NOT_GENERATED', 'GENERATING', 'READY', 'FAILED'],
+    default: 'NOT_GENERATED'
+  },
+  scenarioCount: { type: Number, default: 0 },
 });
 
 export const Agent = mongoose.model<IAgent>('Agent', AgentSchema);

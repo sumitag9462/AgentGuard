@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { CaretLeft, ShieldCheck, Warning, BugBeetle, Robot } from '@phosphor-icons/react';
+import { CaretLeft, ShieldCheck, Warning, BugBeetle, Robot, Lightning } from '@phosphor-icons/react';
 import useSWR from 'swr';
 import { fetcher } from '../services/apiClient';
 import api from '../services/apiClient';
@@ -7,7 +7,7 @@ import { Section, SectionHeader } from '../components/ui/Section';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Table, TableHead, TableHeader, TableBody, TableRow, TableCell } from '../components/ui/Table';
-import type { Agent, Evaluation, HealthCheckResult, AttackSurface } from '../types';
+import type { Agent, Evaluation, HealthCheckResult, AttackSurface, Scenario } from '../types';
 import { useState } from 'react';
 import { ConnectionHealthPanel } from '../components/integration/ConnectionHealthPanel';
 import { AttackSurfacePanel } from '../components/integration/AttackSurfacePanel';
@@ -18,6 +18,7 @@ export default function AgentDetail() {
 
   const { data: agent, isLoading: agentLoading } = useSWR<Agent>(`/agents/${id}`, fetcher);
   const { data: evaluations, isLoading: evalsLoading } = useSWR<Evaluation[]>(`/evaluations?agentId=${id}`, fetcher);
+  const { data: scenarios } = useSWR<Scenario[]>(`/scenarios?agentId=${id}`, fetcher);
 
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<HealthCheckResult | null>(null);
@@ -209,6 +210,26 @@ export default function AgentDetail() {
           )}
         </div>
       </div>
+
+      {scenarios && scenarios.length === 0 && (
+        <Section variant="panel" padding="lg" className="border-info/30 bg-info/5 mt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-content-primary">Ready for Test Generation</p>
+              <p className="text-xs text-content-secondary mt-1">
+                AgentEval now has enough information to build a test plan for this agent.
+              </p>
+            </div>
+            <Button
+              onClick={() => navigate(`/app/scenarios`)}
+              className="gap-2 bg-info text-white border-info"
+            >
+              <Lightning className="w-4 h-4" />
+              Generate Scenarios
+            </Button>
+          </div>
+        </Section>
+      )}
 
       <div className="mt-4">
         <h3 className="text-h3 text-content-primary mb-4">Evaluation History</h3>

@@ -241,7 +241,7 @@ export default function Scenarios() {
                   <div className="line-clamp-2 max-w-sm">{scenario.scenario || (scenario as any).userInput}</div>
                 </TableCell>
                 <TableCell className="text-content-secondary text-[13px]">
-                  <div className="line-clamp-2 max-w-sm">{scenario.rule || scenario.evaluationRule}</div>
+                  <div className="line-clamp-2 max-w-sm">{scenario.expectedBehavior}</div>
                 </TableCell>
               </TableRow>
             ))}

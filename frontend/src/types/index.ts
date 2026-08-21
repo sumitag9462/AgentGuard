@@ -1,6 +1,6 @@
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type TestStatus = 'PASSED' | 'FAILED' | 'SKIPPED';
-export type RunStatus = 'COMPLETED' | 'RUNNING' | 'FAILED' | 'PENDING';
+export type RunStatus = 'COMPLETED' | 'RUNNING' | 'FAILED' | 'PENDING' | 'PARTIAL';
 
 export type IntegrationType = 'INTERNAL' | 'HTTP' | 'OPENAI_COMPATIBLE' | 'WEBHOOK' | 'SDK';
 export type VisibilityMode = 'BLACK_BOX' | 'INSTRUMENTED';
@@ -107,6 +107,9 @@ export interface Agent {
   integration?: AgentIntegration;
   connectionStatus?: ConnectionStatus;
   lastHealthCheck?: string;
+  activeBatchId?: string;
+  scenarioGenerationStatus?: 'NOT_GENERATED' | 'GENERATING' | 'READY' | 'FAILED';
+  scenarioCount?: number;
 }
 
 export interface QualityGateConfig {
@@ -247,6 +250,10 @@ export interface Evaluation {
   recommendations?: Recommendation[];
   report?: Record<string, any>;
   scenarioIds?: string[];
+  scenarioSnapshot?: Array<Record<string, any>>;
+  errorMessage?: string;
+  completedScenarios?: number;
+  totalScenarios?: number;
   isAdaptive?: boolean;
 }
 
@@ -307,6 +314,7 @@ export interface ComparisonResult {
   reliabilityDelta: number;
   criticalDelta: number;
   status: 'READY' | 'BLOCKED';
+  regressionDetected?: boolean;
   failures: {
     new: Failure[];
     resolved: Failure[];

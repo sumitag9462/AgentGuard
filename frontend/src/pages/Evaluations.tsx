@@ -5,19 +5,24 @@ import { Table, TableHead, TableHeader, TableBody, TableRow, TableCell } from '.
 import { Funnel, MagnifyingGlass, Spinner } from '@phosphor-icons/react';
 import useSWR from 'swr';
 import api, { fetcher } from '../services/apiClient';
-import type { Evaluation } from '../types';
+import type { Evaluation, Agent, Scenario } from '../types';
 import { useState } from 'react';
 
 export default function Evaluations() {
   const navigate = useNavigate();
   const [isStarting, setIsStarting] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<string>('');
+  
   const { data: evaluations, error, mutate, isLoading } = useSWR<Evaluation[]>('/evaluations', fetcher, { refreshInterval: 5000 });
+  const { data: agents } = useSWR<Agent[]>('/agents', fetcher);
+  const { data: scenarios } = useSWR<Scenario[]>(selectedAgent ? `/scenarios?agentId=${selectedAgent}` : null, fetcher);
 
   const handleRunEvaluation = async () => {
+    if (!selectedAgent) return;
     try {
       setIsStarting(true);
       const res = await api.post('/evaluations', {
-        agentId: 'agt-001',
+        agentId: selectedAgent,
         version: 'v1.4.2'
       });
       mutate();
@@ -53,10 +58,27 @@ export default function Evaluations() {
             <span className="text-critical">{evaluations?.filter(e => e.qualityGate && !e.qualityGate.passed).length || 0} blocked</span>
           </div>
         </div>
-        <Button onClick={handleRunEvaluation} disabled={isStarting}>
-          {isStarting ? <Spinner className="animate-spin w-5 h-5 mr-2" /> : null}
-          Run Evaluation
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-2 items-center">
+            <select
+              value={selectedAgent}
+              onChange={(e) => setSelectedAgent(e.target.value)}
+              className="bg-canvas border border-border-subtle rounded-md px-3 py-2 text-sm text-content-primary focus:outline-none focus:border-safe font-mono"
+            >
+              <option value="">Select agent...</option>
+              {agents?.map(a => (
+                <option key={a.agentId} value={a.agentId}>{a.name} ({a.agentId})</option>
+              ))}
+            </select>
+            <Button onClick={handleRunEvaluation} disabled={!selectedAgent || !scenarios || scenarios.length === 0 || isStarting}>
+              {isStarting ? <Spinner className="animate-spin w-5 h-5 mr-2" /> : null}
+              Run Evaluation
+            </Button>
+          </div>
+          {selectedAgent && (!scenarios || scenarios.length === 0) && (
+            <span className="text-xs text-content-muted">Generate test scenarios first</span>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-col gap-4">

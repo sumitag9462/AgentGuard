@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 
 import { useParams, useNavigate } from 'react-router-dom';
-import { CaretLeft, ShieldCheck, CheckCircle, XCircle, Lightning, Download, Spinner } from '@phosphor-icons/react';
+import { CaretLeft, ShieldCheck, CheckCircle, XCircle, Lightning, Download, Spinner, Warning } from '@phosphor-icons/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Section, SectionHeader } from '../components/ui/Section';
 import { Badge } from '../components/ui/Badge';
@@ -25,6 +25,11 @@ export default function EvaluationDetails() {
   const { data: agent } = useSWR<any>(evaluation ? `/agents/${evaluation.agentId}` : null, fetcher);
   
   const { data: failures } = useSWR<Failure[]>(`/evaluations/${id}/failures`, fetcher);
+  
+  const { data: scenarioResults } = useSWR<{ results: any[], totalScenarios: number, passed: number, failed: number }>(
+    `/evaluations/${id}/results`,
+    fetcher
+  );
   
   const isRunning = evaluation?.status === 'RUNNING' || evaluation?.status === 'PENDING';
 
@@ -175,6 +180,37 @@ export default function EvaluationDetails() {
         ))}
       </motion.div>
 
+      {/* Infrastructure failure banner (§5.6) */}
+      {evaluation.status === 'FAILED' && (
+        <div className="bg-warning/10 border border-warning/30 rounded-md p-4 flex items-start gap-3 mt-6">
+          <XCircle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-warning">EVALUATION FAILED</p>
+            <p className="text-xs text-content-secondary mt-1">
+              The evaluation engine could not complete this run. {(evaluation as any).errorMessage || 'Reason unknown.'}
+            </p>
+            <p className="text-xs text-content-muted mt-1">
+              This does not mean the agent failed its tests.
+            </p>
+          </div>
+        </div>
+      )}
+      
+      {evaluation.status === 'PARTIAL' && (
+        <div className="bg-warning/10 border border-warning/30 rounded-md p-4 flex items-start gap-3 mt-6">
+          <Warning className="w-5 h-5 text-warning shrink-0 mt-0.5" weight="fill" />
+          <div>
+            <p className="text-sm font-semibold text-warning">EVALUATION INCOMPLETE</p>
+            <p className="text-xs text-content-secondary mt-1">
+              {(evaluation as any).errorMessage || 'The evaluation did not finish all scenarios.'}
+            </p>
+            <p className="text-xs text-content-muted mt-1">
+              Reliability score may be unavailable for partial evaluations.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Summary Score / Release Status */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
         <div className="md:col-span-8">
@@ -304,38 +340,62 @@ export default function EvaluationDetails() {
       </div>
 
       <div className="flex flex-col">
-        <SectionHeader title="Evaluation Results" description="Detailed list of failures and test outcomes." />
+        <SectionHeader title="Evaluation Results" description={`${scenarioResults?.totalScenarios || 0} scenarios — ${scenarioResults?.passed || 0} passed, ${scenarioResults?.failed || 0} failed`} />
         <Table>
           <TableHead>
-            <TableHeader>Test ID</TableHeader>
+            <TableHeader>Scenario ID</TableHeader>
             <TableHeader>Category</TableHeader>
             <TableHeader>Severity</TableHeader>
-            <TableHeader>Failure Type</TableHeader>
+            <TableHeader>Status</TableHeader>
+            <TableHeader>Expected</TableHeader>
+            <TableHeader>Actual</TableHeader>
             <TableHeader>Action</TableHeader>
           </TableHead>
           <TableBody>
-            {failures?.map((failure) => (
-              <TableRow key={failure.id || failure._id}>
-                <TableCell className="font-mono text-content-secondary text-xs">{failure.testId}</TableCell>
-                <TableCell className="text-xs">{failure.category || 'N/A'}</TableCell>
+            {scenarioResults?.results?.map((result: any) => (
+              <TableRow key={result.scenarioId}>
+                <TableCell className="font-mono text-xs">{result.scenarioId}</TableCell>
+                <TableCell><Badge variant={result.category === 'DESTRUCTIVE' ? 'danger' : 'default'}>{result.category}</Badge></TableCell>
                 <TableCell>
-                  <Badge variant={failure.severity === 'CRITICAL' ? 'danger' : failure.severity === 'HIGH' ? 'warning' : 'default'}>
-                    {failure.severity}
+                  <Badge variant={result.severity === 'CRITICAL' ? 'danger' : result.severity === 'HIGH' ? 'warning' : 'default'}>
+                    {result.severity}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-critical font-medium text-xs">{failure.failureType}</TableCell>
                 <TableCell>
-                  <Button variant="ghost" className="h-8 text-xs" onClick={() => navigate(`/app/failures/${failure.id || failure._id}`)}>
-                    View Evidence
-                  </Button>
+                  <Badge variant={
+                    result.status === 'PASS' ? 'success' :
+                    result.status === 'INFRASTRUCTURE_ERROR' ? 'warning' :
+                    'danger'
+                  }>
+                    {result.status}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-content-secondary text-[13px] max-w-xs">
+                  <div className="line-clamp-2">{result.expected}</div>
+                </TableCell>
+                <TableCell className="text-content-secondary text-[13px] max-w-xs">
+                  <div className="line-clamp-2">{result.actual}</div>
+                </TableCell>
+                <TableCell>
+                  {result.status === 'FAIL' && result.failureCategory ? (
+                    <Button variant="ghost" className="h-8 text-xs" onClick={() => {
+                      const failure = failures?.find(f => f.testId === result.scenarioId);
+                      if (failure) navigate(`/app/failures/${failure.id || failure._id}`);
+                    }}>
+                      View Evidence
+                    </Button>
+                  ) : result.hasTrace ? (
+                    <Button variant="ghost" className="h-8 text-xs" onClick={() => navigate(`/app/traces/${result.scenarioId}`)}>
+                      View Trace
+                    </Button>
+                  ) : null}
                 </TableCell>
               </TableRow>
             ))}
-            {(!failures || failures.length === 0) && evaluation.status === 'COMPLETED' && (
+            {(!scenarioResults?.results || scenarioResults.results.length === 0) && evaluation.status === 'COMPLETED' && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-12 text-safe font-medium">
-                  <ShieldCheck className="w-8 h-8 mx-auto mb-2 opacity-80" />
-                  All tests passed successfully! No failures detected.
+                <TableCell colSpan={7} className="text-center py-12 text-content-muted">
+                  No scenario results available.
                 </TableCell>
               </TableRow>
             )}

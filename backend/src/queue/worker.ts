@@ -29,6 +29,36 @@ export const startWorker = () => {
         throw new Error(`Agent ${agentId} not found`);
       }
       
+      // ENFORCEMENT: Re-check scenario count at worker layer (§2)
+      // This prevents evaluation if scenarios were deleted between API check and worker pickup
+      const scenarioCount = await Scenario.countDocuments({ agentId });
+      if (scenarioCount === 0) {
+        const reason = 'Worker enforcement: No test scenarios exist for this agent. Generate scenarios first.';
+        await Evaluation.findByIdAndUpdate(evaluationId, {
+          status: 'FAILED',
+          errorMessage: reason
+        });
+        io.emit('evaluation_status', { runId, status: 'FAILED', error: reason });
+        console.warn(`Job ${job.id} blocked: zero scenarios for agent ${agentId}`);
+        return;
+      }
+
+      // Capture immutable scenario snapshot before execution begins
+      const activeScenarios = await Scenario.find({ agentId }).lean();
+      const scenarioSnapshot = activeScenarios.map(s => ({
+        scenarioId: s.scenarioId,
+        category: s.category,
+        severity: s.severity,
+        scenario: s.scenario,
+        expectedBehavior: s.expectedBehavior,
+        forbiddenActions: s.forbiddenActions,
+        forbiddenToolCalls: s.forbiddenToolCalls,
+        expectedToolCalls: s.expectedToolCalls,
+        rule: s.rule,
+        attackObjective: s.attackObjective,
+        riskLevel: s.riskLevel
+      }));
+      
       // Build the agent config for the Python engine
       const agentConfig = {
         agentId: agent.agentId,
@@ -66,7 +96,9 @@ export const startWorker = () => {
           count: count || 100,
           mode: runMode
         },
-        totalScenarios: count || 100
+        totalScenarios: count || 100,
+        scenarioSnapshot,
+        scenarioIds: activeScenarios.map(s => s.scenarioId)
       });
       
       // Determine if this is an internal or external evaluation
@@ -225,31 +257,30 @@ export const startWorker = () => {
         for (const sc of scenarios) {
           try {
             const scenarioId = sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`;
-            await Scenario.findOneAndUpdate(
-              { scenarioId },
-              {
-                agentId: agentId,
-                title: sc.title || '',
-                category: sc.category,
-                difficulty: sc.difficulty || 'MEDIUM',
-                severity: sc.severity,
-                scenario: sc.userInput,
-                context: sc.context || '',
-                agentGoal: sc.agentGoal || '',
-                expectedBehavior: sc.expectedBehavior,
-                allowedActions: sc.allowedActions || [],
-                forbiddenActions: sc.forbiddenActions || [],
-                expectedToolCalls: sc.expectedToolCalls || [],
-                forbiddenToolCalls: sc.forbiddenToolCalls || [],
-                expectedFinalOutcome: sc.expectedFinalOutcome || '',
-                rule: sc.evaluationRule,
-                attackObjective: sc.attackObjective || '',
-                riskLevel: sc.riskLevel || 'LOW',
-                isAdaptive: sc.isAdaptive || false,
-                round: sc.round || 1
-              },
-              { upsert: true, new: true, setDefaultsOnInsert: true }
-            );
+            const newScenario = new Scenario({
+              scenarioId,
+              agentId: agentId,
+              title: sc.title || '',
+              category: sc.category,
+              difficulty: sc.difficulty || 'MEDIUM',
+              severity: sc.severity,
+              scenario: sc.userInput,
+              context: sc.context || '',
+              agentGoal: sc.agentGoal || '',
+              expectedBehavior: sc.expectedBehavior,
+              allowedActions: sc.allowedActions || [],
+              forbiddenActions: sc.forbiddenActions || [],
+              expectedToolCalls: sc.expectedToolCalls || [],
+              forbiddenToolCalls: sc.forbiddenToolCalls || [],
+              expectedFinalOutcome: sc.expectedFinalOutcome || '',
+              rule: sc.evaluationRule,
+              attackObjective: sc.attackObjective || '',
+              riskLevel: sc.riskLevel || 'LOW',
+              isAdaptive: sc.isAdaptive || false,
+              round: sc.round || 1,
+              batchId: runId
+            });
+            await newScenario.save();
           } catch (scErr) {
             console.warn(`Failed to save scenario ${sc.testId}:`, scErr);
           }
@@ -280,31 +311,30 @@ export const startWorker = () => {
       for (const sc of scenarios) {
         try {
           const scenarioId = sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`;
-          await Scenario.findOneAndUpdate(
-            { scenarioId },
-            {
-              agentId: agentId,
-              title: sc.title || '',
-              category: sc.category,
-              difficulty: sc.difficulty || 'MEDIUM',
-              severity: sc.severity,
-              scenario: sc.userInput,
-              context: sc.context || '',
-              agentGoal: sc.agentGoal || '',
-              expectedBehavior: sc.expectedBehavior,
-              allowedActions: sc.allowedActions || [],
-              forbiddenActions: sc.forbiddenActions || [],
-              expectedToolCalls: sc.expectedToolCalls || [],
-              forbiddenToolCalls: sc.forbiddenToolCalls || [],
-              expectedFinalOutcome: sc.expectedFinalOutcome || '',
-              rule: sc.evaluationRule,
-              attackObjective: sc.attackObjective || '',
-              riskLevel: sc.riskLevel || 'LOW',
-              isAdaptive: sc.isAdaptive || false,
-              round: sc.round || 1
-            },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-          );
+          const newScenario = new Scenario({
+            scenarioId,
+            agentId: agentId,
+            title: sc.title || '',
+            category: sc.category,
+            difficulty: sc.difficulty || 'MEDIUM',
+            severity: sc.severity,
+            scenario: sc.userInput,
+            context: sc.context || '',
+            agentGoal: sc.agentGoal || '',
+            expectedBehavior: sc.expectedBehavior,
+            allowedActions: sc.allowedActions || [],
+            forbiddenActions: sc.forbiddenActions || [],
+            expectedToolCalls: sc.expectedToolCalls || [],
+            forbiddenToolCalls: sc.forbiddenToolCalls || [],
+            expectedFinalOutcome: sc.expectedFinalOutcome || '',
+            rule: sc.evaluationRule,
+            attackObjective: sc.attackObjective || '',
+            riskLevel: sc.riskLevel || 'LOW',
+            isAdaptive: sc.isAdaptive || false,
+            round: sc.round || 1,
+            batchId: runId
+          });
+          await newScenario.save();
         } catch (scErr) {
           console.warn(`Failed to save scenario ${sc.testId}:`, scErr);
         }
@@ -405,8 +435,21 @@ export const startWorker = () => {
       
     } catch (err: any) {
       console.error(`Job ${job.id} failed:`, err);
-      await Evaluation.findByIdAndUpdate(evaluationId, { status: 'FAILED', errorMessage: err.message });
-      io.emit('evaluation_status', { runId, status: 'FAILED', error: err.message });
+      
+      // Check if any results were already saved (partial evaluation)
+      const existingEval = await Evaluation.findById(evaluationId);
+      const hasPartialResults = existingEval && (existingEval.completedScenarios > 0 || existingEval.passed > 0);
+      
+      const finalStatus = hasPartialResults ? 'PARTIAL' : 'FAILED';
+      const errorMsg = hasPartialResults
+        ? `Evaluation incomplete: ${existingEval.completedScenarios} of ${existingEval.totalScenarios} scenarios completed before failure. Reason: ${err.message}`
+        : `Evaluation engine failed: ${err.message}. This does not mean the agent failed its tests.`;
+      
+      await Evaluation.findByIdAndUpdate(evaluationId, {
+        status: finalStatus,
+        errorMessage: errorMsg
+      });
+      io.emit('evaluation_status', { runId, status: finalStatus, error: errorMsg });
       throw err;
     }
 

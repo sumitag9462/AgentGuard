@@ -113,7 +113,7 @@ export default function Evaluations() {
                 <TableCell>
                   <div className="flex flex-col">
                     <span className="font-medium text-content-primary text-sm">
-                      {run.agentId === 'agt-001' ? 'Banking Support Agent' : 'Banking Vulnerable Agent'}
+                      {agents?.find(a => a.agentId === run.agentId)?.name || run.agentId}
                     </span>
                     <span className="font-mono text-content-secondary text-xs">{run.version}</span>
                   </div>

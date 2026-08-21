@@ -8,10 +8,12 @@ import ReactFlow, {
   type Edge,
   type Connection,
   Handle,
-  Position
+  Position,
+  MarkerType
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Warning, CheckCircle, Robot, User, Code, ShieldWarning, ArrowsLeftRight } from '@phosphor-icons/react';
 import type { Trace } from '../../types';
 
 interface NodeData {
@@ -20,26 +22,62 @@ interface NodeData {
   status?: string;
   metadata?: unknown;
   fullLabel?: string;
+  isActive?: boolean;
+  isPast?: boolean;
+  isReplaying?: boolean;
 }
 
+// Icon mapper
+const getIconForStep = (step: string) => {
+  const s = step.toLowerCase();
+  if (s.includes('user')) return <User weight="fill" className="w-4 h-4" />;
+  if (s.includes('llm') || s.includes('model') || s.includes('think')) return <Robot weight="fill" className="w-4 h-4" />;
+  if (s.includes('tool')) return <Code weight="bold" className="w-4 h-4" />;
+  if (s.includes('safety') || s.includes('policy')) return <ShieldWarning weight="fill" className="w-4 h-4" />;
+  return <ArrowsLeftRight className="w-4 h-4" />;
+};
+
 export function AnimatedNode({ data }: { data: NodeData }) {
+  const isFailed = data.status === 'danger';
+  const isSuccess = data.status === 'success';
+  
+  // Logic for replay visibility
+  const opacity = !data.isReplaying ? 1 : (data.isPast || data.isActive ? 1 : 0.2);
+  const scale = data.isActive ? 1.05 : 1;
+  const boxShadow = data.isActive && isFailed ? '0 0 20px rgba(239, 68, 68, 0.4)' : 
+                    data.isActive ? '0 0 20px rgba(99, 102, 241, 0.3)' : 'none';
+
   return (
     <motion.div 
-      initial={{ scale: 0.95, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ type: "spring", duration: 0.5, bounce: 0.2 }}
+      initial={{ scale: 0.9, opacity: 0 }}
+      animate={{ scale, opacity, boxShadow }}
+      transition={{ type: "spring", duration: 0.5 }}
       whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.97 }}
-      className={`px-3 py-2 shadow-xl rounded-md border ${
-        data.status === 'success' ? 'bg-safe-muted border-safe/30 text-safe' : 
-        data.status === 'danger' ? 'bg-critical-muted border-critical/30 text-critical' : 
-        'bg-panel border-border-subtle text-content-primary'
-      } text-xs font-mono cursor-pointer`}
+      className={`relative w-64 p-4 shadow-xl rounded-lg border-2 bg-canvas transition-colors duration-300
+        ${isFailed ? 'border-critical/50' : isSuccess ? 'border-safe/30' : 'border-border-strong'}
+        ${data.isActive ? 'ring-2 ring-offset-2 ring-offset-canvas ' + (isFailed ? 'ring-critical' : 'ring-accent') : ''}
+      `}
     >
-      <Handle type="target" position={Position.Top} className="w-2 h-2 rounded-full border-none bg-content-muted" />
-      <div className="font-semibold mb-1 opacity-50 text-[10px] uppercase tracking-wider">{data.step}</div>
-      <div>{data.label}</div>
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 rounded-full border-none bg-content-muted" />
+      <Handle type="target" position={Position.Top} className="w-3 h-3 rounded-full border-2 border-canvas bg-content-muted" />
+      
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div className={`w-6 h-6 rounded flex items-center justify-center
+            ${isFailed ? 'bg-critical-muted text-critical' : isSuccess ? 'bg-safe-muted text-safe' : 'bg-panel border border-border-subtle text-content-primary'}
+          `}>
+            {getIconForStep(data.step)}
+          </div>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-content-secondary">{data.step}</span>
+        </div>
+        {isFailed && <Warning weight="fill" className="w-4 h-4 text-critical animate-pulse" />}
+        {isSuccess && <CheckCircle weight="fill" className="w-4 h-4 text-safe" />}
+      </div>
+      
+      <div className={`text-[13px] font-medium leading-relaxed line-clamp-3 ${isFailed ? 'text-critical' : 'text-content-primary'}`}>
+        {data.label}
+      </div>
+
+      <Handle type="source" position={Position.Bottom} className="w-3 h-3 rounded-full border-2 border-canvas bg-content-muted" />
     </motion.div>
   );
 }
@@ -48,7 +86,7 @@ const nodeTypes = {
   animated: AnimatedNode,
 };
 
-export default function TraceGraph({ trace }: { trace: Trace }) {
+export default function TraceGraph({ trace, activeEventIndex, isReplaying }: { trace: Trace, activeEventIndex: number, isReplaying: boolean }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeData, setSelectedNodeData] = useState<NodeData | null>(null);
@@ -56,35 +94,66 @@ export default function TraceGraph({ trace }: { trace: Trace }) {
   useEffect(() => {
     if (!trace || !trace.events) return;
     
-    const newNodes: Node[] = trace.events.map((event, index) => ({
-      id: event.eventId || `node-${index}`,
-      type: 'animated',
-      position: { x: 250, y: 50 + index * 100 },
-      data: { 
-        step: event.type.replace('_', ' '),
-        label: event.label.length > 30 ? event.label.substring(0, 30) + '...' : event.label,
-        status: event.status,
-        metadata: event.metadata,
-        fullLabel: event.label
-      }
-    }));
+    const newNodes: Node[] = trace.events.map((event, index) => {
+      const isActive = index === activeEventIndex;
+      const isPast = index <= activeEventIndex;
+      
+      return {
+        id: event.eventId || `node-${index}`,
+        type: 'animated',
+        position: { x: 250, y: 50 + index * 160 }, // Spaced further apart for vertical timeline feel
+        data: { 
+          step: event.type.replace(/_/g, ' '),
+          label: event.label,
+          status: event.status,
+          metadata: event.metadata,
+          fullLabel: event.label,
+          isActive,
+          isPast,
+          isReplaying
+        }
+      };
+    });
 
     const newEdges: Edge[] = [];
     for (let i = 0; i < trace.events.length - 1; i++) {
       const e1 = trace.events[i];
       const e2 = trace.events[i + 1];
+      
+      const isPastEdge = (i + 1) <= activeEventIndex;
+      const isEdgeActive = (i + 1) === activeEventIndex;
+      const edgeOpacity = !isReplaying ? 1 : (isPastEdge ? 1 : 0.1);
+      const isFailedTarget = e2.status === 'danger';
+
       newEdges.push({
         id: `e${e1.eventId || i}-${e2.eventId || i+1}`,
         source: e1.eventId || `node-${i}`,
         target: e2.eventId || `node-${i+1}`,
-        animated: true,
-        style: { stroke: e2.status === 'danger' ? 'var(--color-critical)' : e2.status === 'success' ? 'var(--color-safe)' : '#52525b', strokeWidth: 2 }
+        animated: isEdgeActive || !isReplaying,
+        style: { 
+          stroke: isFailedTarget && isPastEdge ? 'var(--color-critical)' : 'var(--color-border-strong)', 
+          strokeWidth: isEdgeActive ? 3 : 2,
+          opacity: edgeOpacity,
+          transition: 'stroke 0.3s, opacity 0.3s'
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 20,
+          height: 20,
+          color: isFailedTarget && isPastEdge ? 'var(--color-critical)' : 'var(--color-border-strong)',
+        },
       });
     }
 
     setNodes(newNodes);
     setEdges(newEdges);
-  }, [trace, setNodes, setEdges]);
+
+    // Auto-select node if we're replaying and it's active
+    if (isReplaying && activeEventIndex >= 0 && activeEventIndex < trace.events.length) {
+      setSelectedNodeData(newNodes[activeEventIndex].data);
+    }
+
+  }, [trace, activeEventIndex, isReplaying, setNodes, setEdges]);
 
   const onConnect = useCallback((params: Edge | Connection) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
 
@@ -103,40 +172,75 @@ export default function TraceGraph({ trace }: { trace: Trace }) {
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         fitView
+        fitViewOptions={{ padding: 0.2 }}
         proOptions={{ hideAttribution: true }}
+        minZoom={0.2}
       >
-        <Background color="var(--color-border-subtle)" gap={16} size={1} />
+        <Background color="rgba(255,255,255,0.05)" gap={24} size={2} />
       </ReactFlow>
 
-      {/* Metadata Overlay */}
-      {selectedNodeData && (
-        <div className="absolute top-4 right-4 w-80 bg-panel/90 backdrop-blur-md border border-border-subtle rounded-lg p-5 shadow-2xl z-10">
-          <div className="flex justify-between items-center mb-3">
-            <div className="text-[11px] font-bold text-content-secondary uppercase tracking-wider">Node Metadata</div>
-            <button onClick={() => setSelectedNodeData(null)} className="text-content-muted hover:text-content-primary">✕</button>
-          </div>
-          <div className="flex flex-col gap-3">
-            <div>
-              <span className="text-content-muted text-[11px]">Step Type</span>
-              <div className="text-content-primary font-mono text-[13px]">{selectedNodeData.step}</div>
-            </div>
-            <div>
-              <span className="text-content-muted text-[11px]">Content</span>
-              <div className="text-content-secondary text-[13px] bg-canvas p-2 rounded-sm mt-1 border border-border-subtle break-all max-h-40 overflow-y-auto">
-                {selectedNodeData.fullLabel}
+      {/* Progressive Metadata Overlay */}
+      <AnimatePresence>
+        {selectedNodeData && (
+          <motion.div 
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            className="absolute top-4 right-4 bottom-4 w-[calc(100%-2rem)] md:w-96 bg-panel/95 backdrop-blur-xl border border-border-subtle rounded-lg p-6 shadow-2xl z-10 flex flex-col overflow-hidden"
+          >
+            <div className="flex justify-between items-center mb-6 pb-4 border-b border-border-subtle shrink-0">
+              <div className="flex items-center gap-2">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center border
+                  ${selectedNodeData.status === 'danger' ? 'bg-critical-muted text-critical border-critical/30' : 'bg-surface text-content-primary border-border-strong'}
+                `}>
+                  {getIconForStep(selectedNodeData.step)}
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-content-muted uppercase tracking-widest">Selected Step</div>
+                  <div className="text-sm font-semibold text-content-primary uppercase">{selectedNodeData.step}</div>
+                </div>
               </div>
+              <button onClick={() => setSelectedNodeData(null)} className="text-content-muted hover:text-content-primary transition-colors p-2 rounded-full hover:bg-surface">✕</button>
             </div>
-            {selectedNodeData.metadata && Object.keys(selectedNodeData.metadata).length > 0 ? (
-              <div>
-                <span className="text-content-muted text-[11px]">Arguments / Result</span>
-                <pre className="text-safe font-mono text-[11px] bg-canvas p-2 rounded-sm mt-1 border border-border-subtle overflow-x-auto">
-                  {JSON.stringify(selectedNodeData.metadata, null, 2)}
-                </pre>
+            
+            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-6">
+              
+              <div className="flex flex-col gap-2">
+                <span className="text-[11px] font-bold text-content-secondary uppercase tracking-widest flex items-center gap-2">
+                  Content <span className="flex-1 h-px bg-border-subtle" />
+                </span>
+                <div className="text-[13px] text-content-primary bg-canvas p-4 rounded-md border border-border-subtle break-all shadow-inner leading-relaxed">
+                  {selectedNodeData.fullLabel || 'No content'}
+                </div>
               </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+
+              {!!selectedNodeData.metadata && typeof selectedNodeData.metadata === 'object' && Object.keys(selectedNodeData.metadata as Record<string, unknown>).length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <span className="text-[11px] font-bold text-content-secondary uppercase tracking-widest flex items-center gap-2">
+                    Payload / Arguments <span className="flex-1 h-px bg-border-subtle" />
+                  </span>
+                  <pre className="text-content-primary font-mono text-[11px] bg-canvas p-4 rounded-md border border-border-subtle overflow-x-auto shadow-inner">
+                    {JSON.stringify(selectedNodeData.metadata, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {selectedNodeData.status === 'danger' && (
+                <div className="flex flex-col gap-2 mt-auto">
+                  <div className="bg-critical/10 p-4 rounded-md border border-critical/20">
+                    <div className="text-critical font-bold text-xs uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <Warning weight="fill" /> Violation Detected
+                    </div>
+                    <div className="text-[13px] text-critical-strong opacity-90 leading-relaxed">
+                      This step contains a policy violation, unexpected output, or failure to recover. See failure details for root cause analysis.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

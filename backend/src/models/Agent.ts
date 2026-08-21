@@ -7,7 +7,7 @@ export interface IToolSchema {
   inputSchema: Record<string, any>;
   outputSchema: Record<string, any>;
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  sideEffectLevel: 'NONE' | 'REVERSIBLE' | 'DESTRUCTIVE';
+  sideEffectLevel: 'NONE' | 'READ_ONLY' | 'STATE_CHANGE' | 'EXTERNAL' | 'DESTRUCTIVE';
   requiresConfirmation: boolean;
   reversible: boolean;
   mockSuccessResponse?: any;
@@ -83,7 +83,7 @@ const ToolSchemaDefinition = new Schema({
   inputSchema: { type: Schema.Types.Mixed, default: {} },
   outputSchema: { type: Schema.Types.Mixed, default: {} },
   riskLevel: { type: String, enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'], default: 'LOW' },
-  sideEffectLevel: { type: String, enum: ['NONE', 'REVERSIBLE', 'DESTRUCTIVE'], default: 'NONE' },
+  sideEffectLevel: { type: String, enum: ['NONE', 'READ_ONLY', 'STATE_CHANGE', 'EXTERNAL', 'DESTRUCTIVE'], default: 'NONE' },
   requiresConfirmation: { type: Boolean, default: false },
   reversible: { type: Boolean, default: true },
   mockSuccessResponse: { type: Schema.Types.Mixed }

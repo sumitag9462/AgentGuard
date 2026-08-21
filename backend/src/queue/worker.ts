@@ -62,7 +62,7 @@ export const startWorker = () => {
         status: 'RUNNING',
         agentConfigSnapshot: agentConfig,
         evaluationConfig: {
-          model: (agentConfig as any).model || 'gemini-3.6-flash',
+          model: (agentConfig as any).model || 'gemini-2.5-flash',
           count: count || 100,
           mode: runMode
         },
@@ -223,29 +223,36 @@ export const startWorker = () => {
       if (runMode === 'generate-scenarios') {
         const scenarios = payload.scenarios || [];
         for (const sc of scenarios) {
-          const newScenario = new Scenario({
-            scenarioId: sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`,
-            agentId: agentId,
-            title: sc.title || '',
-            category: sc.category,
-            difficulty: sc.difficulty || 'MEDIUM',
-            severity: sc.severity,
-            scenario: sc.userInput,
-            context: sc.context || '',
-            agentGoal: sc.agentGoal || '',
-            expectedBehavior: sc.expectedBehavior,
-            allowedActions: sc.allowedActions || [],
-            forbiddenActions: sc.forbiddenActions || [],
-            expectedToolCalls: sc.expectedToolCalls || [],
-            forbiddenToolCalls: sc.forbiddenToolCalls || [],
-            expectedFinalOutcome: sc.expectedFinalOutcome || '',
-            rule: sc.evaluationRule,
-            attackObjective: sc.attackObjective || '',
-            riskLevel: sc.riskLevel || 'LOW',
-            isAdaptive: sc.isAdaptive || false,
-            round: sc.round || 1
-          });
-          await newScenario.save();
+          try {
+            const scenarioId = sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`;
+            await Scenario.findOneAndUpdate(
+              { scenarioId },
+              {
+                agentId: agentId,
+                title: sc.title || '',
+                category: sc.category,
+                difficulty: sc.difficulty || 'MEDIUM',
+                severity: sc.severity,
+                scenario: sc.userInput,
+                context: sc.context || '',
+                agentGoal: sc.agentGoal || '',
+                expectedBehavior: sc.expectedBehavior,
+                allowedActions: sc.allowedActions || [],
+                forbiddenActions: sc.forbiddenActions || [],
+                expectedToolCalls: sc.expectedToolCalls || [],
+                forbiddenToolCalls: sc.forbiddenToolCalls || [],
+                expectedFinalOutcome: sc.expectedFinalOutcome || '',
+                rule: sc.evaluationRule,
+                attackObjective: sc.attackObjective || '',
+                riskLevel: sc.riskLevel || 'LOW',
+                isAdaptive: sc.isAdaptive || false,
+                round: sc.round || 1
+              },
+              { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+          } catch (scErr) {
+            console.warn(`Failed to save scenario ${sc.testId}:`, scErr);
+          }
         }
         
         await Evaluation.findByIdAndUpdate(evaluationId, { 
@@ -272,10 +279,10 @@ export const startWorker = () => {
       // Save generated scenarios to DB
       for (const sc of scenarios) {
         try {
-          const existing = await Scenario.findOne({ scenarioId: sc.testId });
-          if (!existing) {
-            const newScenario = new Scenario({
-              scenarioId: sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`,
+          const scenarioId = sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`;
+          await Scenario.findOneAndUpdate(
+            { scenarioId },
+            {
               agentId: agentId,
               title: sc.title || '',
               category: sc.category,
@@ -295,9 +302,9 @@ export const startWorker = () => {
               riskLevel: sc.riskLevel || 'LOW',
               isAdaptive: sc.isAdaptive || false,
               round: sc.round || 1
-            });
-            await newScenario.save();
-          }
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
         } catch (scErr) {
           console.warn(`Failed to save scenario ${sc.testId}:`, scErr);
         }
@@ -398,7 +405,7 @@ export const startWorker = () => {
       
     } catch (err: any) {
       console.error(`Job ${job.id} failed:`, err);
-      await Evaluation.findByIdAndUpdate(evaluationId, { status: 'FAILED' });
+      await Evaluation.findByIdAndUpdate(evaluationId, { status: 'FAILED', errorMessage: err.message });
       io.emit('evaluation_status', { runId, status: 'FAILED', error: err.message });
       throw err;
     }

@@ -212,7 +212,7 @@ def evaluate_semantic(
     client: OpenAI,
     trace_steps: list[dict],
     scenario: dict,
-    model: str = "gemini-3.6-flash"
+    model: str = "gemini-2.5-flash"
 ) -> dict:
     """
     Use LLM-as-judge for semantic evaluation where deterministic rules
@@ -434,8 +434,9 @@ def _format_trace_for_judge(trace_steps: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _api_call_with_retry(client: OpenAI, prompt: str, model: str = "gemini-3.6-flash", max_retries: int = 3):
+def _api_call_with_retry(client: OpenAI, prompt: str, model: str = "gemini-2.5-flash", max_retries: int = 3):
     """Make an API call with retry on rate limits."""
+    import time
     for attempt in range(max_retries):
         try:
             return client.chat.completions.create(
@@ -446,7 +447,7 @@ def _api_call_with_retry(client: OpenAI, prompt: str, model: str = "gemini-3.6-f
         except Exception as e:
             if "429" in str(e) and attempt < max_retries - 1:
                 wait = 20 * (attempt + 1)
-                print(f"Evaluator rate limit hit, sleeping for {wait}s...")
+                print(f"Rate limit hit, sleeping for {wait}s...")
                 time.sleep(wait)
             else:
                 raise

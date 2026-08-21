@@ -223,7 +223,7 @@ export class HttpAgentAdapter implements AgentAdapter {
         return this._errorExecution(executionId, input, 'AUTH_ERROR', `Authentication failed: HTTP ${response.status}`, latencyMs);
       }
 
-      if (response.status >= 500) {
+      if (response.status >= 400) {
         return this._errorExecution(executionId, input, 'AGENT_ERROR', `Agent returned HTTP ${response.status}`, latencyMs);
       }
 
@@ -232,9 +232,11 @@ export class HttpAgentAdapter implements AgentAdapter {
       const responseText = await this._readResponseWithLimit(response, maxBytes);
 
       // Extract output
-      let output: string;
+      let output: any;
+      let parsedData: any = {};
       try {
         const responseData = JSON.parse(responseText);
+        parsedData = responseData;
         if (config.responseMapping) {
           output = extractResponseValue(responseData, config.responseMapping) || responseText;
         } else {
@@ -247,23 +249,66 @@ export class HttpAgentAdapter implements AgentAdapter {
         output = responseText;
       }
 
+      const toolCalls = Array.isArray(parsedData.toolCalls) ? parsedData.toolCalls.map((tc: any) => ({
+        name: tc.name || tc.function || tc.tool || 'unknown_tool',
+        arguments: tc.arguments || {}
+      })) : [];
+
+      const trace = [];
+      const errors = [];
+      let blockedByGuardrail = false;
+
+      // Tool Interception (Sandbox/Safety Check)
+      if (toolCalls.length > 0 && config.tools) {
+        // Import dynamically to avoid circular dependencies if any, or assume it's imported at top
+        const { ToolInterceptor } = require('../security/ToolInterceptor');
+        
+        for (const tc of toolCalls) {
+          trace.push({
+            eventId: `evt_${crypto.randomBytes(4).toString('hex')}`,
+            eventType: 'TOOL_CALL',
+            timestamp: new Date().toISOString(),
+            data: { tool: tc.name, parameters: tc.arguments }
+          });
+
+          const interceptResult = ToolInterceptor.check(tc.name, tc.arguments, config.tools, false, config.replayContext);
+          
+          trace.push({
+            eventId: `evt_${crypto.randomBytes(4).toString('hex')}`,
+            eventType: 'SAFETY_CHECK',
+            timestamp: new Date().toISOString(),
+            data: interceptResult.traceEvent.data
+          });
+
+          if (interceptResult.blocked && interceptResult.reason === 'FORBIDDEN_ACTION_WITHOUT_CONFIRMATION') {
+            blockedByGuardrail = true;
+            errors.push({
+              code: 'FORBIDDEN_ACTION_WITHOUT_CONFIRMATION',
+              message: `Blocked by Guardrail: ${interceptResult.traceEvent.label}`
+            });
+          }
+        }
+      }
+
+      trace.push({
+        eventId: `evt_${crypto.randomBytes(4).toString('hex')}`,
+        eventType: 'AGENT_RESPONSE',
+        timestamp: new Date().toISOString(),
+        data: { responseStatus: response.status, latencyMs },
+      });
+
       return {
         executionId,
-        status: 'COMPLETED',
+        status: blockedByGuardrail ? 'GUARDRAIL_BLOCKED' : 'COMPLETED',
         input,
         output: typeof output === 'string' ? output : JSON.stringify(output),
         latencyMs,
-        toolCalls: [],         // BLACK_BOX: no tool visibility
-        errors: [],
-        trace: [{
-          eventId: `evt_${crypto.randomBytes(4).toString('hex')}`,
-          eventType: 'AGENT_RESPONSE',
-          timestamp: new Date().toISOString(),
-          data: { responseStatus: response.status, latencyMs },
-        }],
+        toolCalls,
+        errors,
+        trace,
         metadata: {
           integrationType: this.adapterType,
-          visibility: config.visibilityMode || 'BLACK_BOX',
+          visibility: (toolCalls.length > 0) ? 'INSTRUMENTED' : (config.visibilityMode || 'BLACK_BOX')
         },
       };
 

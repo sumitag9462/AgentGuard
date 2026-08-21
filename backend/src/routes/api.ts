@@ -176,7 +176,15 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
     const agent = await Agent.findOne({ agentId: req.params.id });
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
     
-    const count = req.body.count || 1000;
+    let count = req.body.count;
+    if (!count) {
+      const baseCount = 10;
+      const toolCount = agent.tools?.length || 0;
+      const criticalBonus = (agent.policies?.length || 0) * 2;
+      const policyBonus = agent.policies?.length || 0;
+      count = Math.min(100, baseCount + toolCount * 2 + criticalBonus + policyBonus);
+    }
+    
     const runId = `GEN-${crypto.randomInt(1000, 9999)}`;
     
     // Create a placeholder evaluation to track the generation
@@ -189,19 +197,108 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
     });
     await newEval.save();
     
-    // Queue the scenario generation job
-    await evaluationQueue.add('run-evaluation', {
-      evaluationId: newEval._id,
-      runId,
+    // Process synchronously instead of using Redis to guarantee it runs locally
+    // (BullMQ hangs if Redis is not installed)
+    const { runPythonPipeline } = require('../services/pythonRunner');
+    
+    // Send response immediately so UI doesn't hang
+    res.status(202).json({ runId, evaluationId: newEval._id, status: 'GENERATING', count });
+    
+    // Run in background
+    setTimeout(async () => {
+      try {
+        const payload = await runPythonPipeline('generate-scenarios', {
+          agentId: agent.agentId,
+          name: agent.name,
+          version: agent.latestVersion,
+          domain: agent.domain,
+          systemPrompt: agent.systemPrompt,
+          tools: agent.tools,
+          policies: agent.policies,
+        }, {
+          evaluationId: newEval._id.toString(),
+          runId,
+          count
+        });
+        
+        const scenarios = payload.scenarios || [];
+        for (const sc of scenarios) {
+          const newScenario = new Scenario({
+            scenarioId: sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`,
+            agentId: agent.agentId,
+            title: sc.title || '',
+            category: sc.category,
+            difficulty: sc.difficulty || 'MEDIUM',
+            severity: sc.severity,
+            scenario: sc.userInput,
+            expectedBehavior: sc.expectedBehavior,
+            rule: sc.evaluationRule
+          });
+          await newScenario.save();
+        }
+        
+        newEval.status = 'COMPLETED';
+        await newEval.save();
+      } catch (err: any) {
+        console.error('Generation failed:', err);
+        newEval.status = 'FAILED';
+        (newEval as any).error = err.message;
+        await newEval.save();
+      }
+    }, 100);
+    
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to trigger scenario generation' });
+  }
+});
+
+// DEBUG: Synchronous generation endpoint
+router.post('/agents/:id/debug-generate', async (req, res) => {
+  try {
+    const agent = await Agent.findOne({ agentId: req.params.id });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    
+    const count = 3;
+    const runId = `GEN-${crypto.randomInt(1000, 9999)}`;
+    const newEval = new Evaluation({ runId, agentId: agent.agentId, version: agent.latestVersion || '1.0.0', status: 'PENDING' });
+    await newEval.save();
+    
+    const { runPythonPipeline } = require('../services/pythonRunner');
+    const payload = await runPythonPipeline('generate-scenarios', {
       agentId: agent.agentId,
+      name: agent.name,
       version: agent.latestVersion,
-      mode: 'generate-scenarios',
+      domain: agent.domain,
+      systemPrompt: agent.systemPrompt,
+      tools: agent.tools,
+      policies: agent.policies,
+    }, {
+      evaluationId: newEval._id.toString(),
+      runId,
       count
     });
     
-    res.status(202).json({ runId, evaluationId: newEval._id, status: 'GENERATING', count });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to trigger scenario generation' });
+    const scenarios = payload.scenarios || [];
+    const saved = [];
+    for (const sc of scenarios) {
+      const newScenario = new Scenario({
+        scenarioId: sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`,
+        agentId: agent.agentId,
+        title: sc.title || '',
+        category: sc.category,
+        difficulty: sc.difficulty || 'MEDIUM',
+        severity: sc.severity,
+        scenario: sc.userInput,
+        expectedBehavior: sc.expectedBehavior,
+        rule: sc.evaluationRule
+      });
+      await newScenario.save();
+      saved.push(newScenario);
+    }
+    
+    res.json({ success: true, payload, saved });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed', message: err.message, stack: err.stack });
   }
 });
 
@@ -528,65 +625,29 @@ router.get('/evaluations/:id/traces', async (req, res) => {
 // COMPARISON & REGRESSION
 // ==========================================================================
 
-// POST compare two evaluations
-router.post('/compare', validate(CompareRequestSchema), async (req, res) => {
+import { ComparisonService } from '../services/evaluation/ComparisonService';
+
+// GET compare two evaluations
+router.get('/compare', async (req, res) => {
   try {
-    const { eval1, eval2 } = req.body;
+    const { eval1, eval2 } = req.query;
     
+    if (!eval1 || !eval2) {
+      return res.status(400).json({ error: 'eval1 and eval2 are required query parameters' });
+    }
+
     const evalA = await Evaluation.findById(eval1 as string).catch(() => null) || await Evaluation.findOne({ runId: eval1 as string });
     const evalB = await Evaluation.findById(eval2 as string).catch(() => null) || await Evaluation.findOne({ runId: eval2 as string });
-    
+
     if (!evalA || !evalB) {
       return res.status(404).json({ error: 'One or both evaluations not found' });
     }
-    
-    // Calculate deltas
-    const comparison = {
-      versionA: evalA.version,
-      versionB: evalB.version,
-      evalIdA: evalA._id,
-      evalIdB: evalB._id,
-      metrics: [
-        { name: 'Reliability', old: evalA.reliability, new: evalB.reliability },
-        { name: 'Safety', old: evalA.scorecard?.safety || 0, new: evalB.scorecard?.safety || 0 },
-        { name: 'Goal Adherence', old: evalA.scorecard?.goal_adherence || 0, new: evalB.scorecard?.goal_adherence || 0 },
-        { name: 'Tool Accuracy', old: evalA.scorecard?.tool_accuracy || 0, new: evalB.scorecard?.tool_accuracy || 0 },
-        { name: 'Recovery', old: evalA.scorecard?.recovery || 0, new: evalB.scorecard?.recovery || 0 },
-        { name: 'Robustness', old: evalA.scorecard?.robustness || 0, new: evalB.scorecard?.robustness || 0 },
-        { name: 'Efficiency', old: evalA.scorecard?.efficiency || 0, new: evalB.scorecard?.efficiency || 0 },
-      ],
-      reliabilityDelta: (evalB.reliability || 0) - (evalA.reliability || 0),
-      safetyDelta: (evalB.scorecard?.safety || 0) - (evalA.scorecard?.safety || 0),
-      criticalA: evalA.criticalFailures,
-      criticalB: evalB.criticalFailures,
-      failedA: evalA.failed,
-      failedB: evalB.failed,
-      passedA: evalA.passed,
-      passedB: evalB.passed,
-      totalA: evalA.totalTests,
-      totalB: evalB.totalTests,
-      regressionDetected: (evalB.reliability || 0) < (evalA.reliability || 0) || 
-                           (evalB.criticalFailures || 0) > (evalA.criticalFailures || 0),
-      improvements: [] as string[],
-      regressions: [] as string[]
-    };
-    
-    // Identify improvements and regressions
-    for (const m of comparison.metrics) {
-      const delta = m.new - m.old;
-      if (delta > 2) comparison.improvements.push(`${m.name}: +${delta.toFixed(1)}%`);
-      else if (delta < -2) comparison.regressions.push(`${m.name}: ${delta.toFixed(1)}%`);
-    }
-    
-    if (evalB.criticalFailures < evalA.criticalFailures) {
-      comparison.improvements.push(`Critical failures: ${evalA.criticalFailures} → ${evalB.criticalFailures}`);
-    } else if (evalB.criticalFailures > evalA.criticalFailures) {
-      comparison.regressions.push(`Critical failures: ${evalA.criticalFailures} → ${evalB.criticalFailures}`);
-    }
-    
-    res.json(comparison);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to compare evaluations' });
+
+    const result = await ComparisonService.compare(evalA._id.toString(), evalB._id.toString());
+    res.json(result);
+  } catch (err: any) {
+    console.error('Comparison error:', err);
+    res.status(500).json({ error: 'Failed to compare evaluations', details: err.message });
   }
 });
 
@@ -917,58 +978,17 @@ router.post('/agents/:id/attack-surface', async (req, res) => {
     const agent = await Agent.findOne({ agentId: req.params.id, deleted: { $ne: true } });
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
     
-    const tools = agent.tools || [];
-    const policies = agent.policies || [];
-    const prohibited = agent.prohibitedActions || [];
-    
-    const criticalTools = tools.filter((t: any) => t.riskLevel === 'CRITICAL');
-    const highRiskTools = tools.filter((t: any) => t.riskLevel === 'HIGH');
-    const mediumRiskTools = tools.filter((t: any) => t.riskLevel === 'MEDIUM');
-    const lowRiskTools = tools.filter((t: any) => t.riskLevel === 'LOW');
-    const destructiveTools = tools.filter((t: any) => t.sideEffectLevel === 'DESTRUCTIVE').map((t: any) => t.name);
-    const confirmationRequired = tools.filter((t: any) => t.requiresConfirmation).map((t: any) => t.name);
-    
-    // Build recommended attacks based on agent capabilities
-    const recommendedAttacks: string[] = [];
-    if (tools.length > 0) recommendedAttacks.push('TOOL_MISUSE');
-    if (criticalTools.length > 0) recommendedAttacks.push('DESTRUCTIVE_ACTION', 'CONFIRMATION_BYPASS', 'UNAUTHORIZED_ACTION');
-    if (highRiskTools.length > 0) recommendedAttacks.push('PRIVILEGE_ESCALATION');
-    if (policies.length > 0) recommendedAttacks.push('POLICY_CONFLICT');
-    recommendedAttacks.push('PROMPT_INJECTION', 'GOAL_DRIFT', 'HALLUCINATION', 'DATA_LEAKAGE');
-    if (tools.length > 2) recommendedAttacks.push('TOOL_LOOP');
-    recommendedAttacks.push('RECOVERY', 'EDGE_CASE', 'AMBIGUOUS');
-    
-    // Calculate recommended scenario count
-    const baseCount = 10;
-    const toolCount = tools.length * 5;
-    const criticalBonus = criticalTools.length * 10;
-    const policyBonus = policies.length * 3;
-    const recommendedScenarioCount = Math.min(250, baseCount + toolCount + criticalBonus + policyBonus);
-    
-    const attackSurface = {
-      toolsDetected: tools.length,
-      criticalRiskTools: criticalTools.length,
-      highRiskTools: highRiskTools.length,
-      mediumRiskTools: mediumRiskTools.length,
-      lowRiskTools: lowRiskTools.length,
-      policiesCount: policies.length,
-      prohibitedActionsCount: prohibited.length,
-      recommendedAttacks,
-      recommendedScenarioCount,
-      destructiveTools,
-      confirmationRequiredTools: confirmationRequired,
-      toolRiskAnalysis: tools.map((t: any) => ({
-        name: t.name,
-        riskLevel: t.riskLevel || 'LOW',
-        sideEffect: t.sideEffectLevel || 'NONE',
-        reversible: t.reversible !== false,
-        requiresConfirmation: t.requiresConfirmation || false,
-      })),
-    };
-    
-    res.json(attackSurface);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    const { AttackSurfaceService } = require('../services/attackSurface.service');
+    const attackSurfaces = await AttackSurfaceService.syncAgentAttackSurface(agent.agentId);
+
+    res.json({
+      message: 'Attack surface successfully generated',
+      status: 'success',
+      attackSurfaces
+    });
+  } catch (error: any) {
+    console.error(`Error generating attack surface for agent ${req.params.id}:`, error);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -1131,26 +1151,27 @@ router.get('/agents/:id/attack-surface', async (req, res) => {
     const agent = await Agent.findOne({ agentId: req.params.id });
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
 
-    const tools = agent.tools || [];
-    const policies = agent.policies || [];
-    const prohibited = agent.prohibitedActions || [];
+    const { AttackSurfaceService } = require('../services/attackSurface.service');
+    const attackSurfaces = await AttackSurfaceService.getAttackSurfaceByAgent(agent.agentId);
 
-    const criticalTools = tools.filter(t => t.riskLevel === 'CRITICAL');
-    const highTools = tools.filter(t => t.riskLevel === 'HIGH');
-    const mediumTools = tools.filter(t => t.riskLevel === 'MEDIUM');
-    const lowTools = tools.filter(t => t.riskLevel === 'LOW');
-    const destructiveTools = tools.filter(t => t.sideEffectLevel === 'DESTRUCTIVE');
-    const confirmationTools = tools.filter(t => t.requiresConfirmation);
+    const criticalTools = attackSurfaces.filter((t: any) => t.riskLevel === 'CRITICAL');
+    const highTools = attackSurfaces.filter((t: any) => t.riskLevel === 'HIGH');
+    const mediumTools = attackSurfaces.filter((t: any) => t.riskLevel === 'MEDIUM');
+    const lowTools = attackSurfaces.filter((t: any) => t.riskLevel === 'LOW');
+    const destructiveTools = attackSurfaces.filter((t: any) => t.sideEffectLevel === 'DESTRUCTIVE');
+    const confirmationTools = attackSurfaces.filter((t: any) => t.requiresConfirmation);
 
     // Generate recommended attacks based on agent configuration
     const recommendedAttacks: string[] = [];
-    if (tools.length > 0) recommendedAttacks.push('Unauthorized Tool Use');
+    if (attackSurfaces.length > 0) recommendedAttacks.push('Unauthorized Tool Use');
     if (criticalTools.length > 0) {
       recommendedAttacks.push('Prompt Injection');
       recommendedAttacks.push('Confirmation Bypass');
     }
     if (destructiveTools.length > 0) recommendedAttacks.push('Destructive Action Without Safeguard');
-    if (policies.length > 0) {
+    
+    // Check policies dynamically if possible, or just add
+    if (agent.policies && agent.policies.length > 0) {
       recommendedAttacks.push('Policy Violation');
       recommendedAttacks.push('Goal Drift');
     }
@@ -1161,24 +1182,34 @@ router.get('/agents/:id/attack-surface', async (req, res) => {
 
     // Calculate recommended scenario count based on attack surface
     const baseScenarios = 10;
-    const toolScenarios = tools.length * 5;
-    const policyScenarios = policies.length * 3;
+    const toolScenarios = attackSurfaces.length * 5;
+    const policyScenarios = (agent.policies || []).length * 3;
     const criticalScenarios = criticalTools.length * 10;
-    const attackScenarios = recommendedAttacks.length * 3;
-    const recommendedScenarioCount = baseScenarios + toolScenarios + policyScenarios + criticalScenarios + attackScenarios;
+    
+    // Total scenarios
+    const recommendedScenarioCountFinal = baseScenarios + toolScenarios + policyScenarios + criticalScenarios;
 
-    const attackSurface: AttackSurface = {
-      toolsDetected: tools.length,
+    const attackSurface = {
+      toolsDetected: attackSurfaces.length,
       criticalRiskTools: criticalTools.length,
       highRiskTools: highTools.length,
       mediumRiskTools: mediumTools.length,
       lowRiskTools: lowTools.length,
-      policiesCount: policies.length,
-      prohibitedActionsCount: prohibited.length,
+      policiesCount: (agent.policies || []).length,
+      prohibitedActionsCount: (agent.prohibitedActions || []).length,
       recommendedAttacks,
-      recommendedScenarioCount,
-      destructiveTools: destructiveTools.map(t => t.name),
-      confirmationRequiredTools: confirmationTools.map(t => t.name),
+      recommendedScenarioCount: recommendedScenarioCountFinal,
+      destructiveTools: destructiveTools.map((t: any) => t.toolName),
+      confirmationRequiredTools: confirmationTools.map((t: any) => t.toolName),
+      toolRiskAnalysis: attackSurfaces.map((t: any) => ({
+        name: t.toolName,
+        riskLevel: t.riskLevel,
+        sideEffect: t.sideEffectLevel,
+        reversible: t.sideEffectLevel !== 'DESTRUCTIVE',
+        requiresConfirmation: t.requiresConfirmation,
+        applicablePolicies: t.applicablePolicies,
+        testCategories: t.testCategories
+      })),
     };
 
     res.json(attackSurface);
@@ -1340,6 +1371,146 @@ router.get('/agents/:id/test-recommendations', async (req, res) => {
     res.json(recommendations);
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate test recommendations' });
+  }
+});
+
+import { ReplayRun } from '../models/ReplayRun';
+import { TraceComparator } from '../services/evaluation/TraceComparator';
+import { AgentExecution } from '../models/AgentExecution';
+import { HttpAgentAdapter } from '../services/adapters/HttpAgentAdapter';
+
+// GET a replay run status
+router.get('/replays/:replayId', async (req, res) => {
+  try {
+    const replay = await ReplayRun.findOne({ replayId: req.params.replayId });
+    if (!replay) return res.status(404).json({ error: 'Replay not found' });
+    res.json(replay);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch replay status' });
+  }
+});
+
+// POST replay a trace
+router.post('/evaluations/:evaluationId/traces/:traceId/replay', async (req, res) => {
+  try {
+    const { evaluationId, traceId } = req.params;
+    const mode = req.body.mode || 'ENVIRONMENT';
+
+    // Validate original trace
+    const originalTrace = await Trace.findOne({ traceId, evaluationId });
+    if (!originalTrace) return res.status(404).json({ error: 'Original trace not found' });
+
+    // Validate original evaluation and execution
+    const originalExecution = await AgentExecution.findOne({ evaluationId, traceReference: traceId });
+    if (!originalExecution) return res.status(404).json({ error: 'Original execution not found' });
+
+    const agent = await Agent.findOne({ agentId: originalExecution.agentId });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+    const replayId = `RPL-${crypto.randomBytes(4).toString('hex')}`;
+    const newTraceId = `TRC-${crypto.randomBytes(6).toString('hex')}`;
+    const newExecutionId = `EXEC-${crypto.randomBytes(6).toString('hex')}`;
+
+    const replayRun = new ReplayRun({
+      replayId,
+      originalEvaluationId: evaluationId,
+      originalTraceId: traceId,
+      agentId: agent.agentId,
+      scenarioId: originalExecution.scenarioId,
+      originalVersion: originalExecution.agentVersion,
+      replayVersion: agent.latestVersion || '1.0.0',
+      status: 'RUNNING',
+      mode,
+      newTraceId,
+      newExecutionId,
+      startedAt: new Date()
+    });
+    await replayRun.save();
+
+    // Send response immediately to allow polling
+    res.status(202).json(replayRun);
+
+    // Run async execution
+    setTimeout(async () => {
+      try {
+        const adapter = new HttpAgentAdapter();
+        const config = {
+          ...agent.integration,
+          tools: agent.tools,
+          replayContext: {
+            originalTraceId: traceId,
+            mode,
+            originalTraceEvents: originalTrace.events
+          }
+        };
+
+        const result = await adapter.execute(originalExecution.input, {
+          agentId: agent.agentId,
+          agentVersion: agent.latestVersion || '1.0.0',
+          evaluationId: replayRun.replayId, // use replayId as evaluationId context
+          scenarioId: originalExecution.scenarioId,
+          executionId: newExecutionId,
+        }, config as any);
+
+        // Save new execution and trace
+        const newTrace = new Trace({
+          traceId: newTraceId,
+          testId: originalExecution.scenarioId,
+          evaluationId: replayRun.replayId,
+          events: result.trace.map((e: any) => ({
+            ...e,
+            type: e.eventType || 'TOOL_CALL' // Normalize
+          }))
+        });
+        await newTrace.save();
+
+        const newExecution = new AgentExecution({
+          executionId: newExecutionId,
+          agentId: agent.agentId,
+          agentVersion: agent.latestVersion || '1.0.0',
+          evaluationId: replayRun.replayId,
+          scenarioId: originalExecution.scenarioId,
+          integrationType: result.metadata.integrationType,
+          visibilityMode: result.metadata.visibility,
+          status: result.status,
+          input: result.input,
+          output: result.output,
+          latencyMs: result.latencyMs,
+          toolCalls: result.toolCalls,
+          executionErrors: result.errors.map(err => ({ message: err, severity: 'ERROR' })),
+          traceReference: newTraceId,
+          configSnapshot: agent.toObject(),
+          timestamp: new Date()
+        });
+        await newExecution.save();
+
+        // Compare
+        const originalFailure = originalExecution.status === 'GUARDRAIL_BLOCKED' ? 'FORBIDDEN_ACTION_WITHOUT_CONFIRMATION' : undefined;
+        const replayFailure = result.status === 'GUARDRAIL_BLOCKED' ? 'FORBIDDEN_ACTION_WITHOUT_CONFIRMATION' : undefined;
+        
+        const comparison = TraceComparator.compare(
+          originalTrace.events,
+          newTrace.events,
+          originalFailure,
+          replayFailure
+        );
+
+        replayRun.status = 'COMPLETED';
+        replayRun.completedAt = new Date();
+        replayRun.comparison = comparison;
+        await replayRun.save();
+
+      } catch (err: any) {
+        console.error('Replay failed:', err);
+        replayRun.status = 'FAILED';
+        replayRun.completedAt = new Date();
+        replayRun.comparison = { match: false, divergence: err.message, metrics: { originalSteps: 0, replaySteps: 0, latencyDifferenceMs: 0 } };
+        await replayRun.save();
+      }
+    }, 100);
+
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to trigger replay' });
   }
 });
 

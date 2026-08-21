@@ -9,6 +9,7 @@ import ConnectAgent from "./pages/ConnectAgent";
 import AgentDetail from "./pages/AgentDetail";
 import Evaluations from "./pages/Evaluations";
 import EvaluationDetails from "./pages/EvaluationDetails";
+import Failures from "./pages/Failures";
 import FailureDetails from "./pages/FailureDetails";
 import TraceViewer from "./pages/TraceViewer";
 import Scenarios from "./pages/Scenarios";
@@ -26,6 +27,7 @@ function App() {
         <Route path="agents/:id" element={<AgentDetail />} />
         <Route path="evaluations" element={<Evaluations />} />
         <Route path="evaluations/:id" element={<EvaluationDetails />} />
+        <Route path="failures" element={<Failures />} />
         <Route path="failures/:id" element={<FailureDetails />} />
         <Route path="traces/:testId" element={<TraceViewer />} />
         <Route path="scenarios" element={<Scenarios />} />

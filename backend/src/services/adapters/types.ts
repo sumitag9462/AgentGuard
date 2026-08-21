@@ -24,6 +24,7 @@ export type ExecutionStatus =
   | 'TELEMETRY_ERROR'
   | 'EXECUTION_ERROR'
   | 'EVALUATION_ERROR'
+  | 'GUARDRAIL_BLOCKED'
   | 'CANCELLED';
 
 export type ConnectionStatus =
@@ -74,6 +75,12 @@ export interface AgentIntegrationConfig {
   webhookSecretReference?: string;    // encrypted
   // Health check
   healthCheckConfig?: HealthCheckConfig;
+  tools?: any[];
+  replayContext?: {
+    originalTraceId: string;
+    mode: 'ENVIRONMENT' | 'FRESH';
+    originalTraceEvents: any[];
+  };
 }
 
 // ============================================================================

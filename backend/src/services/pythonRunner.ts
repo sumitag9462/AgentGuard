@@ -82,12 +82,14 @@ export const runPythonPipeline = async (
     pythonProcess.stdout.on('data', (data) => {
       const output = data.toString();
       stdoutData += output;
+      console.log(`[python-stdout] ${output}`);
       io.emit('evaluation_log', { runId, type: 'stdout', message: output });
     });
     
     pythonProcess.stderr.on('data', (data) => {
       const output = data.toString();
       stderrData += output;
+      console.error(`[python-stderr] ${output}`);
       io.emit('evaluation_log', { runId, type: 'stderr', message: output });
     });
     
@@ -121,7 +123,7 @@ export const runPythonPipeline = async (
           resolve({ raw: stdoutData, parseError: String(parseErr) });
         }
       } else {
-        const errorMsg = `Python script exited with code ${code}.\nEvaluation: ${evaluationId}\nStderr: ${stderrData.slice(0, 2000)}`;
+        const errorMsg = `Python script exited with code ${code}.\nEvaluation: ${options.evaluationId || 'unknown'}\nStderr: ${stderrData.slice(0, 2000)}`;
         console.error(`[pythonRunner] ${errorMsg}`);
         reject(new Error(errorMsg));
       }

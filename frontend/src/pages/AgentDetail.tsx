@@ -1,9 +1,9 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { CaretLeft, ShieldCheck, Warning, BugBeetle } from '@phosphor-icons/react';
+import { CaretLeft, ShieldCheck, Warning, BugBeetle, Robot } from '@phosphor-icons/react';
 import useSWR from 'swr';
 import { fetcher } from '../services/apiClient';
 import api from '../services/apiClient';
-import { Card, CardHeader } from '../components/ui/Card';
+import { Section, SectionHeader } from '../components/ui/Section';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Table, TableHead, TableHeader, TableBody, TableRow, TableCell } from '../components/ui/Table';
@@ -54,44 +54,61 @@ export default function AgentDetail() {
   };
 
   if (agentLoading) {
-    return <div className="text-content-secondary">Loading agent details...</div>;
+    return <div className="text-content-secondary animate-pulse p-8">Loading agent details...</div>;
   }
 
   if (!agent) {
-    return <div className="text-critical">Agent not found.</div>;
+    return <div className="text-critical p-8">Agent not found.</div>;
   }
 
+  const latestEval = evaluations?.[0];
 
   return (
-    <div className="flex flex-col gap-8 max-w-5xl mx-auto">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-12">
       {/* Header */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 border-b border-border-subtle pb-6">
         <button 
-          onClick={() => navigate(-1)}
+          onClick={() => navigate('/app/agents')}
           className="flex items-center justify-center w-8 h-8 rounded-full bg-panel border border-border-subtle text-content-secondary hover:text-content-primary transition-colors"
         >
           <CaretLeft className="w-4 h-4" />
         </button>
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold text-content-primary tracking-tight">{agent.name}</h1>
+        <div className="w-12 h-12 rounded-lg bg-panel flex items-center justify-center border border-border-subtle">
+          <Robot className="w-6 h-6 text-content-secondary" />
+        </div>
+        <div className="flex-1 flex justify-between items-start">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-display text-content-primary uppercase tracking-tight">{agent.name}</h1>
+            <div className="flex items-center gap-3 font-mono text-[13px] text-content-secondary">
+              <span>{agent.agentId}</span>
+              <span>•</span>
+              <span>v{agent.latestVersion}</span>
+              <span>•</span>
+              <span>{agent.domain}</span>
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-2">
             <Badge variant={agent.status === 'Healthy' ? 'success' : agent.status === 'Degraded' ? 'warning' : 'danger'}>
               {agent.status}
             </Badge>
+            <div className="text-xs text-content-muted">Last evaluated: {latestEval ? 'Recently' : 'Never'}</div>
           </div>
-          <p className="text-content-secondary mt-1">Domain: {agent.domain} • Version: {agent.latestVersion}</p>
         </div>
       </div>
 
+      <div className="flex justify-end gap-3">
+        <Button variant="ghost" onClick={handleTestConnection} disabled={testingConnection}>
+          {testingConnection ? 'Testing...' : 'Test Connection'}
+        </Button>
+        <Button variant="ghost" onClick={handleAnalyzeSurface} disabled={analyzingSurface}>
+          {analyzingSurface ? 'Analyzing...' : 'Analyze Surface'}
+        </Button>
+        <Button onClick={() => navigate('/app/evaluations')}>Run Evaluation</Button>
+      </div>
+
       {/* Integration & Attack Surface */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="flex flex-col gap-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-bold text-content-primary">Integration Health</h2>
-            <Button onClick={handleTestConnection} disabled={testingConnection} variant="secondary" className="text-[13px]">
-              {testingConnection ? 'Testing...' : 'Test Connection'}
-            </Button>
-          </div>
           <ConnectionHealthPanel 
             integration={agent.integration} 
             status={testResult ? (testResult.healthy ? 'CONNECTED' : 'DEGRADED') : agent.connectionStatus} 
@@ -100,42 +117,36 @@ export default function AgentDetail() {
         </div>
         
         <div className="flex flex-col gap-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-bold text-content-primary">Attack Surface</h2>
-            <Button onClick={handleAnalyzeSurface} disabled={analyzingSurface} variant="secondary" className="text-[13px]">
-              {analyzingSurface ? 'Analyzing...' : 'Run Scan'}
-            </Button>
-          </div>
           {surfaceResult ? (
             <AttackSurfacePanel attackSurface={surfaceResult} />
           ) : (
-            <Card className="flex flex-col items-center justify-center p-8 bg-panel border-border-subtle text-center h-60">
-              <BugBeetle className="w-12 h-12 text-content-muted mb-4" />
-              <p className="text-content-secondary mb-2">No surface scan available</p>
-              <Button onClick={handleAnalyzeSurface} variant="secondary" className="text-[13px]">
+            <Section variant="panel" padding="md" className="flex flex-col items-center justify-center text-center h-full min-h-[240px]">
+              <BugBeetle className="w-8 h-8 text-content-muted mb-4" />
+              <p className="text-body-sm text-content-secondary mb-4">Run an attack surface scan to detect vulnerabilities.</p>
+              <Button onClick={handleAnalyzeSurface} variant="secondary" className="text-xs h-8">
                 Scan Integration
               </Button>
-            </Card>
+            </Section>
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <div className="md:col-span-2 flex flex-col gap-8">
-          <Card>
-            <CardHeader title="System Prompt" />
-            <div className="mt-4 p-4 bg-panel border border-border-subtle rounded-md text-[13px] text-content-primary whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+        <div className="md:col-span-8 flex flex-col gap-6">
+          <Section variant="panel" padding="md">
+            <SectionHeader title="System Prompt" />
+            <div className="p-4 bg-canvas border border-border-subtle rounded-md text-[13px] text-content-primary whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">
               {agent.systemPrompt || 'No system prompt provided.'}
             </div>
-          </Card>
+          </Section>
 
-          <Card>
-            <CardHeader title="Tools Registry" description={`${agent.tools.length} tools registered`} />
-            <div className="mt-4 flex flex-col gap-4">
+          <Section variant="panel" padding="md">
+            <SectionHeader title="Tools Registry" description={`${agent.tools.length} tools registered`} />
+            <div className="flex flex-col gap-3">
               {agent.tools.map((tool, idx) => (
-                <div key={idx} className="p-4 rounded-md bg-panel border border-border-subtle">
+                <div key={idx} className="p-4 rounded-md bg-canvas border border-border-subtle hover:border-border-strong transition-colors">
                   <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-mono text-[13px] font-bold text-safe">{tool.name}</h3>
+                    <h3 className="font-mono text-[13px] font-bold text-info">{tool.name}</h3>
                     <div className="flex gap-2">
                       {tool.requiresConfirmation && <Badge variant="warning">Requires Confirmation</Badge>}
                       <Badge variant={tool.riskLevel === 'CRITICAL' ? 'danger' : tool.riskLevel === 'HIGH' ? 'warning' : 'default'}>
@@ -143,109 +154,98 @@ export default function AgentDetail() {
                       </Badge>
                     </div>
                   </div>
-                  <p className="text-[13px] text-content-secondary mb-3">{tool.description}</p>
-                  <div className="text-[11px] text-content-muted font-mono">
+                  <p className="text-body-sm text-content-secondary mb-3">{tool.description}</p>
+                  <div className="text-[11px] text-content-muted font-mono bg-panel p-2 rounded border border-border-subtle">
                     Input: {JSON.stringify(tool.inputSchema)}
                   </div>
                 </div>
               ))}
             </div>
-          </Card>
+          </Section>
         </div>
 
-        <div className="flex flex-col gap-8">
-          <Card>
-            <CardHeader title="Agent Profile" />
-            <div className="mt-4 flex flex-col gap-4 text-[13px]">
-              <div>
-                <div className="text-content-muted mb-1">Agent ID</div>
-                <div className="text-content-primary font-mono">{agent.agentId}</div>
+        <div className="md:col-span-4 flex flex-col gap-6">
+          <Section variant="panel" padding="md">
+            <SectionHeader title="Configuration" />
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col">
+                <span className="text-label text-content-muted mb-1">Provider</span>
+                <span className="text-body-sm text-content-primary font-mono">{agent.provider || 'Not specified'}</span>
               </div>
-              <div>
-                <div className="text-content-muted mb-1">Provider</div>
-                <div className="text-content-primary">{agent.provider || 'Not specified'}</div>
-              </div>
-              <div>
-                <div className="text-content-muted mb-1">Max Tool Calls</div>
-                <div className="text-content-primary">{agent.maxToolCalls}</div>
+              <div className="flex flex-col">
+                <span className="text-label text-content-muted mb-1">Max Tool Calls</span>
+                <span className="text-body-sm text-content-primary font-mono">{agent.maxToolCalls}</span>
               </div>
             </div>
-          </Card>
+          </Section>
 
-          <Card>
-            <CardHeader title="Safety Policies" description={`${agent.policies.length} policies defined`} />
-            <ul className="mt-4 flex flex-col gap-3">
+          <Section variant="panel" padding="md">
+            <SectionHeader title="Safety Policies" description={`${agent.policies.length} policies defined`} />
+            <ul className="flex flex-col gap-3">
               {agent.policies.map((policy, idx) => (
-                <li key={idx} className="flex gap-3 text-[13px]">
+                <li key={idx} className="flex gap-3 text-body-sm">
                   <ShieldCheck className="w-5 h-5 text-safe shrink-0" />
-                  <div>
-                    <span className="font-medium text-content-primary block">{policy.name}</span>
-                    <span className="text-content-secondary text-[11px]">{policy.description}</span>
+                  <div className="flex flex-col">
+                    <span className="font-medium text-content-primary">{policy.name}</span>
+                    <span className="text-content-secondary text-[13px] mt-0.5">{policy.description}</span>
                   </div>
                 </li>
               ))}
             </ul>
-          </Card>
+          </Section>
           
           {agent.prohibitedActions && agent.prohibitedActions.length > 0 && (
-            <Card className="border-critical/20 bg-critical-muted">
-              <CardHeader title="Prohibited Actions" />
-              <ul className="mt-4 flex flex-col gap-2">
+            <Section variant="panel" padding="md" className="border-critical/30 bg-critical-muted">
+              <SectionHeader title="Prohibited Actions" className="mb-3" />
+              <ul className="flex flex-col gap-2">
                 {agent.prohibitedActions.map((action, idx) => (
-                  <li key={idx} className="flex gap-2 text-[13px] text-critical">
+                  <li key={idx} className="flex items-start gap-2 text-body-sm text-critical">
                     <Warning className="w-4 h-4 shrink-0 mt-0.5" />
                     <span>{action}</span>
                   </li>
                 ))}
               </ul>
-            </Card>
+            </Section>
           )}
         </div>
       </div>
 
-      <Card>
-        <CardHeader title="Evaluation History" />
-        {evalsLoading ? (
-          <div className="p-4 text-zinc-500">Loading history...</div>
-        ) : (
-          <Table className="mt-4">
-            <TableHead>
-              <TableHeader>Run ID</TableHeader>
-              <TableHeader>Version</TableHeader>
-              <TableHeader>Date</TableHeader>
-              <TableHeader>Reliability</TableHeader>
-              <TableHeader>Status</TableHeader>
-            </TableHead>
-            <TableBody>
-              {evaluations?.map(evalRun => (
-                <TableRow key={evalRun.runId} onClick={() => navigate(`/app/evaluations/${evalRun.id || evalRun._id}`)}>
-                  <TableCell className="font-mono text-content-primary">{evalRun.runId}</TableCell>
-                  <TableCell>{evalRun.version}</TableCell>
-                  <TableCell className="text-content-secondary">{new Date(evalRun.timestamp).toLocaleDateString()}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 h-1.5 bg-panel-hover rounded-full overflow-hidden">
-                        <div className={`h-full ${evalRun.reliability >= 90 ? 'bg-safe' : evalRun.reliability >= 70 ? 'bg-warning' : 'bg-critical'}`} style={{ width: `${evalRun.reliability}%` }} />
-                      </div>
-                      <span>{evalRun.reliability}%</span>
+      <div className="mt-4">
+        <h3 className="text-h3 text-content-primary mb-4">Evaluation History</h3>
+        <Table loading={evalsLoading} empty={!evalsLoading && (!evaluations || evaluations.length === 0)} emptyProps={{ title: 'No evaluations yet', description: 'Run an evaluation to establish a baseline.' }}>
+          <TableHead>
+            <TableHeader>Run ID</TableHeader>
+            <TableHeader>Version</TableHeader>
+            <TableHeader>Date</TableHeader>
+            <TableHeader>Reliability</TableHeader>
+            <TableHeader>Release Status</TableHeader>
+          </TableHead>
+          <TableBody>
+            {evaluations?.map(evalRun => (
+              <TableRow key={evalRun.runId} onClick={() => navigate(`/app/evaluations/${evalRun.id || evalRun._id}`)}>
+                <TableCell className="font-mono text-info text-xs">{evalRun.runId}</TableCell>
+                <TableCell className="font-mono text-content-secondary text-xs">{evalRun.version}</TableCell>
+                <TableCell className="text-content-secondary text-xs">{new Date(evalRun.timestamp).toLocaleDateString()}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-1.5 bg-panel-hover rounded-full overflow-hidden">
+                      <div className={`h-full ${evalRun.reliability >= 90 ? 'bg-safe' : evalRun.reliability >= 70 ? 'bg-warning' : 'bg-critical'}`} style={{ width: `${evalRun.reliability}%` }} />
                     </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={evalRun.status === 'COMPLETED' ? 'success' : evalRun.status === 'FAILED' ? 'danger' : 'warning'}>{evalRun.status}</Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {(!evaluations || evaluations.length === 0) && (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-content-muted">
-                    No evaluations run yet for this agent.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
+                    <span className={`font-mono text-sm ${evalRun.reliability >= 90 ? 'text-safe' : evalRun.reliability >= 70 ? 'text-warning' : 'text-critical'}`}>
+                      {evalRun.reliability}%
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={evalRun.qualityGate?.passed ? 'success' : evalRun.status === 'FAILED' ? 'danger' : 'warning'}>
+                    {evalRun.qualityGate?.passed ? 'READY' : 'BLOCKED'}
+                  </Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

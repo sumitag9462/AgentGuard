@@ -9,7 +9,12 @@
     "seed:reset": "tsx src/seed.ts --reset",
     "build": "tsc",
     "start": "node dist/index.js",
-    "ci:eval": "tsx src/cli.ts"
+    "ci:eval": "tsx src/cli.ts",
+    "test": "jest",
+    "test:unit": "jest --testMatch='**/__tests__/**/*.test.ts'",
+    "test:integration": "jest --testMatch='**/tests/integration/**/*.test.ts'",
+    "test:e2e": "jest --testMatch='**/tests/e2e/**/*.test.ts'",
+    "test:all": "jest"
   },
   "keywords": [],
   "author": "",
@@ -29,10 +34,15 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
     "@types/node": "^26.2.0",
+    "@types/supertest": "^7.2.1",
+    "jest": "^30.4.2",
     "nodemon": "^3.1.14",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.12",
-    "typescript": "^7.0.2"
+    "typescript": "^5.4.5"
   }
 }

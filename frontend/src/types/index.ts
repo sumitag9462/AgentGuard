@@ -56,6 +56,8 @@ export interface AttackSurface {
     sideEffect: string;
     reversible: boolean;
     requiresConfirmation: boolean;
+    applicablePolicies?: string[];
+    testCategories?: string[];
   }>;
 }
 
@@ -293,6 +295,7 @@ export interface ComparisonMetric {
   name: string;
   old: number;
   new: number;
+  delta: number;
 }
 
 export interface ComparisonResult {
@@ -302,18 +305,14 @@ export interface ComparisonResult {
   evalIdB: string;
   metrics: ComparisonMetric[];
   reliabilityDelta: number;
-  safetyDelta: number;
-  criticalA: number;
-  criticalB: number;
-  failedA: number;
-  failedB: number;
-  passedA: number;
-  passedB: number;
-  totalA: number;
-  totalB: number;
-  regressionDetected: boolean;
-  improvements: string[];
-  regressions: string[];
+  criticalDelta: number;
+  status: 'READY' | 'BLOCKED';
+  failures: {
+    new: Failure[];
+    resolved: Failure[];
+    persisting: Failure[];
+  };
+  warnings: string[];
 }
 
 export interface TestSuite {

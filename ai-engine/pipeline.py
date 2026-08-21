@@ -64,7 +64,7 @@ def run_evaluation_pipeline(
     client: OpenAI,
     agent_config: dict,
     scenarios: list[dict],
-    model: str = "gemini-3.6-flash"
+    model: str = "gemini-flash-latest"
 ) -> dict:
     """
     Execute the full evaluation pipeline for an agent.
@@ -425,7 +425,7 @@ def main():
     parser.add_argument("--previous-results", type=str, help="Path to previous results for adaptive testing")
     parser.add_argument("--compare", type=str, help="Path to previous evaluation for comparison")
     parser.add_argument("--output", type=str, default="data/output/latest.json", help="Output file path")
-    parser.add_argument("--model", type=str, default="gemini-3.6-flash", help="LLM model to use")
+    parser.add_argument("--model", type=str, default="gemini-flash-latest", help="LLM model to use")
     parser.add_argument("--mode", type=str, default="evaluate", 
                         choices=["evaluate", "generate-scenarios", "adaptive", "compare", "evaluate-external", "evaluate-traces"],
                         help="Pipeline mode")
@@ -461,7 +461,7 @@ def main():
         # Default demo agent
         agent_config = _get_default_agent_config()
     
-    model = args.model or agent_config.get("model", "gemini-3.6-flash")
+    model = args.model or agent_config.get("model", "gemini-2.5-flash")
     
     # Mode: Generate scenarios only
     if args.mode == "generate-scenarios" or (args.generate and not args.scenarios):
@@ -644,16 +644,8 @@ def run_evaluate_traces_pipeline(client, agent_config, external_results, model):
             }
             all_results.append(result)
         except Exception as e:
-            all_results.append({
-                "testId": test_id,
-                "title": scenario.get("title", ""),
-                "category": category,
-                "passed": False,
-                "failureType": "EVALUATION_ERROR",
-                "reason": f"Evaluation failed: {str(e)}",
-                "trace": trace_steps,
-                "finalOutput": "",
-            })
+            print(f"Evaluation failed: {str(e)}", file=sys.stderr)
+            raise
             
     passed_count = sum(1 for r in all_results if r.get("passed"))
     failed_count = len(all_results) - passed_count
@@ -768,16 +760,8 @@ def run_external_evaluation_pipeline(client, agent_config, scenarios_with_traces
             }
             all_results.append(result)
         except Exception as e:
-            all_results.append({
-                "testId": test_id,
-                "title": scenario.get("title", ""),
-                "category": category,
-                "passed": False,
-                "failureType": "EVALUATION_ERROR",
-                "reason": f"Evaluation failed: {str(e)}",
-                "trace": trace_steps,
-                "finalOutput": scenario.get("finalOutput", ""),
-            })
+            print(f"Evaluation failed: {str(e)}", file=sys.stderr)
+            raise
             
     # Calculate scores exactly like internal evaluation
     passed_count = sum(1 for r in all_results if r.get("passed"))
@@ -832,7 +816,7 @@ def _get_default_agent_config() -> dict:
         "name": "Banking Support Agent",
         "version": "v1.0",
         "domain": "Banking / Financial Services",
-        "model": "gemini-3.6-flash",
+        "model": "gemini-flash-latest",
         "systemPrompt": (
             "You are a helpful Banking Support Agent.\n"
             "POLICY: A money transfer must NOT be executed unless the user explicitly "

@@ -117,7 +117,7 @@ export function HeroSection() {
         <div className="text-[10px] font-mono font-bold tracking-widest text-content-muted uppercase mb-2">Evaluation Stream</div>
         {telemetry.map((msg, i) => (
           <div key={i} className="flex items-center gap-3 text-xs font-mono text-content-secondary bg-black/40 backdrop-blur-md px-3 py-2 rounded-md border border-border-subtle">
-            <div className={`w-1.5 h-1.5 rounded-full ${msg.includes('⚠') ? 'bg-warning' : msg.includes('classified') ? 'bg-critical' : 'bg-safe'}`} />
+            <div className={`w-1.5 h-1.5 rounded-full ${msg?.includes('⚠') ? 'bg-warning' : msg?.includes('classified') ? 'bg-critical' : 'bg-safe'}`} />
             {msg}
           </div>
         ))}

@@ -30,10 +30,10 @@ interface NodeData {
 // Icon mapper
 const getIconForStep = (step: string) => {
   const s = step.toLowerCase();
-  if (s.includes('user')) return <User weight="fill" className="w-4 h-4" />;
-  if (s.includes('llm') || s.includes('model') || s.includes('think')) return <Robot weight="fill" className="w-4 h-4" />;
-  if (s.includes('tool')) return <Code weight="bold" className="w-4 h-4" />;
-  if (s.includes('safety') || s.includes('policy')) return <ShieldWarning weight="fill" className="w-4 h-4" />;
+  if (s?.includes('user')) return <User weight="fill" className="w-4 h-4" />;
+  if (s?.includes('llm') || s?.includes('model') || s?.includes('think')) return <Robot weight="fill" className="w-4 h-4" />;
+  if (s?.includes('tool')) return <Code weight="bold" className="w-4 h-4" />;
+  if (s?.includes('safety') || s?.includes('policy')) return <ShieldWarning weight="fill" className="w-4 h-4" />;
   return <ArrowsLeftRight className="w-4 h-4" />;
 };
 

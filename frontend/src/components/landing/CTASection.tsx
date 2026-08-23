@@ -37,7 +37,7 @@ export function CTASection() {
           <Link to="/app" className="bg-white text-black px-8 py-4 rounded-full font-medium flex items-center gap-2 hover:scale-105 transition-transform shadow-[0_0_30px_rgba(255,255,255,0.1)]">
             Run Interactive Demo <ArrowRight weight="bold" />
           </Link>
-          <a href="#" className="glass-panel text-white px-8 py-4 rounded-full font-medium flex items-center gap-2 hover:bg-white/10 transition-colors">
+          <a href="https://github.com/sumitag9462/AgentGuard" target="_blank" rel="noopener noreferrer" className="glass-panel text-white px-8 py-4 rounded-full font-medium flex items-center gap-2 hover:bg-white/10 transition-colors">
             <GithubLogo weight="fill" className="text-xl" /> View GitHub
           </a>
         </motion.div>
@@ -59,7 +59,7 @@ export function Footer() {
           <a href="#" className="hover:text-white transition-colors">Platform</a>
           <a href="#" className="hover:text-white transition-colors">Methodology</a>
           <a href="#" className="hover:text-white transition-colors">Documentation</a>
-          <a href="#" className="hover:text-white transition-colors">GitHub</a>
+          <a href="https://github.com/sumitag9462/AgentGuard" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
         </div>
         
         <div className="text-xs font-mono text-content-muted">

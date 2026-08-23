@@ -1,7 +1,10 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IScenario extends Document {
+  organizationId?: mongoose.Types.ObjectId;
+  projectId?: mongoose.Types.ObjectId;
   scenarioId: string;
+  sourceTestId?: string;
   agentId: string;
   title: string;
   category: string;
@@ -27,7 +30,10 @@ export interface IScenario extends Document {
 }
 
 const ScenarioSchema: Schema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
+  projectId: { type: Schema.Types.ObjectId, ref: 'Project' },
   scenarioId: { type: String, required: true, unique: true },
+  sourceTestId: { type: String },
   agentId: { type: String, default: '' },
   title: { type: String, default: '' },
   category: { type: String, required: true },

@@ -22,3 +22,18 @@ env/
 # Custom
 .gemini/
 backend/mongo-data/
+
+# Environment files
+.env.*
+!.env.example
+
+# Build/Coverage
+coverage/
+
+# Logs
+*.log
+
+# AgentGuard specific
+logs/
+ai-engine/reports/
+data/output/

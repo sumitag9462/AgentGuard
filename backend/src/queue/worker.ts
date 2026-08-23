@@ -21,7 +21,7 @@ export const startWorker = () => {
     const io = getIo();
     
     try {
-      io.emit('evaluation_status', { runId, status: 'RUNNING' });
+      io.to('evaluation:' + runId).emit('evaluation_status', { runId, status: 'RUNNING' });
       
       // Fetch agent config from DB
       const agent = await Agent.findOne({ agentId });
@@ -38,7 +38,7 @@ export const startWorker = () => {
           status: 'FAILED',
           errorMessage: reason
         });
-        io.emit('evaluation_status', { runId, status: 'FAILED', error: reason });
+        io.to('evaluation:' + runId).emit('evaluation_status', { runId, status: 'FAILED', error: reason });
         console.warn(`Job ${job.id} blocked: zero scenarios for agent ${agentId}`);
         return;
       }
@@ -144,7 +144,7 @@ export const startWorker = () => {
           const testId = scenario.testId || `SC-${crypto.randomBytes(4).toString('hex')}`;
           scenario.testId = testId;
           
-          io.emit('evaluation_status', { runId, status: `Executing ${i+1}/${scenarios.length}` });
+          io.to('evaluation:' + runId).emit('evaluation_status', { runId, status: `Executing ${i+1}/${scenarios.length}` });
           
           const executionId = `run_${crypto.randomBytes(8).toString('hex')}`;
           
@@ -232,7 +232,7 @@ export const startWorker = () => {
         }
         
         // 4. Send traces to Python for evaluation
-        io.emit('evaluation_status', { runId, status: 'Evaluating results' });
+        io.to('evaluation:' + runId).emit('evaluation_status', { runId, status: 'Evaluating results' });
         
         // Save externalResults to temp file for Python to read
         const fs = require('fs');
@@ -252,7 +252,7 @@ export const startWorker = () => {
       }
       
       // Handle generate-scenarios mode
-      if (runMode === 'generate-scenarios') {
+      if (mode === 'generate-scenarios') {
         const scenarios = payload.scenarios || [];
         for (const sc of scenarios) {
           try {
@@ -291,7 +291,9 @@ export const startWorker = () => {
           scenarioIds: scenarios.map((s: any) => s.testId)
         });
         
-        io.emit('evaluation_status', { runId, status: 'COMPLETED', scenarioCount: scenarios.length });
+        await Agent.findOneAndUpdate({ agentId }, { scenarioGenerationStatus: 'IDLE' });
+        io.to('evaluation:' + runId).emit('evaluation_status', { runId, status: 'COMPLETED', scenarioCount: scenarios.length });
+        io.to('agent:' + agentId).emit('scenario:generation_completed', { agentId, batchId: runId, count: scenarios.length });
         return;
       }
       
@@ -430,7 +432,7 @@ export const startWorker = () => {
         );
       }
       
-      io.emit('evaluation_status', { runId, status: 'COMPLETED', reliability: evaluation.reliability });
+      io.to('evaluation:' + runId).emit('evaluation_status', { runId, status: 'COMPLETED', reliability: evaluation.reliability });
       console.log(`Job ${job.id} finished successfully.`);
       
     } catch (err: any) {
@@ -449,7 +451,13 @@ export const startWorker = () => {
         status: finalStatus,
         errorMessage: errorMsg
       });
-      io.emit('evaluation_status', { runId, status: finalStatus, error: errorMsg });
+      io.to('evaluation:' + runId).emit('evaluation_status', { runId, status: finalStatus, error: errorMsg });
+      
+      if (mode === 'generate-scenarios') {
+         await Agent.findOneAndUpdate({ agentId: agentId }, { scenarioGenerationStatus: 'IDLE' });
+         io.to('agent:' + agentId).emit('scenario:generation_failed', { agentId: agentId, error: errorMsg });
+      }
+      
       throw err;
     }
 

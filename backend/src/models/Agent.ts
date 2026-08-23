@@ -46,6 +46,8 @@ export interface IAgentIntegration {
 }
 
 export interface IAgent extends Document {
+  organizationId?: mongoose.Types.ObjectId;
+  projectId?: mongoose.Types.ObjectId;
   agentId: string;
   name: string;
   description: string;
@@ -120,6 +122,8 @@ const IntegrationSchema = new Schema({
 }, { _id: false });
 
 const AgentSchema: Schema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
+  projectId: { type: Schema.Types.ObjectId, ref: 'Project' },
   agentId: { type: String, required: true, unique: true },
   name: { type: String, required: true },
   description: { type: String, default: '' },
@@ -164,6 +168,8 @@ const AgentSchema: Schema = new Schema({
   },
   scenarioCount: { type: Number, default: 0 },
 });
+
+AgentSchema.index({ organizationId: 1, deleted: 1 });
 
 export const Agent = mongoose.model<IAgent>('Agent', AgentSchema);
 

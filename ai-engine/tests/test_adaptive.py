@@ -1,4 +1,4 @@
-from adaptive_tester import analyze_failure_patterns, generate_adaptive_scenarios
+from risk.adaptive_tester import analyze_failure_patterns, generate_adaptive_scenarios
 
 def test_analyze_failure_patterns_extracts_categories():
     failures = [

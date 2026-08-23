@@ -1,252 +1,232 @@
-import { Badge } from '../components/ui/Badge';
-import { Table, TableHead, TableHeader, TableBody, TableRow, TableCell } from '../components/ui/Table';
-import { Button } from '../components/ui/Button';
-import { Lightning, Funnel, Plus, CaretLeft, Database } from '@phosphor-icons/react';
-import useSWR from 'swr';
-import { fetcher } from '../services/apiClient';
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Sparkle, ShieldCheck, Bug, WarningOctagon, MagnifyingGlass, Spinner } from '@phosphor-icons/react';
+import useSWR, { mutate } from 'swr';
 import api from '../services/apiClient';
-import type { Scenario, Agent } from '../types';
-import { useState, useMemo, useEffect } from 'react';
-import { io } from 'socket.io-client';
+import { useSocketEvents, socketManager } from '../lib/socket';
 
-const socket = io(import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') : 'http://localhost:4000');
+const fetcher = (url: string) => api.get(url).then(res => res.data);
 
 export default function Scenarios() {
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
-  const [generatingForAgent, setGeneratingForAgent] = useState<string | null>(null);
-  
-  // Controls which agent's scenarios we are viewing. null = list of agents.
-  const [selectedAgentView, setSelectedAgentView] = useState<string | null>(null);
-  const [generationProgress, setGenerationProgress] = useState<string>('');
+  const [generating, setGenerating] = useState(false);
+  const [stage, setStage] = useState(0);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
 
+  const { data: scenarios = [], isLoading } = useSWR<any[]>('/scenarios', fetcher);
+
+  // Subscribe to generation events
   useEffect(() => {
-    const onLog = (data: any) => {
-      if (data.type === 'stdout' && typeof data.message === 'string') {
-        const match = data.message.match(/PROGRESS: (.*)/);
-        if (match) {
-          setGenerationProgress(match[1]);
-        }
-      }
-    };
-    socket.on('evaluation_log', onLog);
-    return () => {
-      socket.off('evaluation_log', onLog);
-    };
-  }, []);
-  
-  const { data: scenarios, mutate: mutateScenarios, isLoading: isLoadingScenarios } = useSWR<Scenario[]>('/scenarios', fetcher);
-  const { data: agents, isLoading: isLoadingAgents } = useSWR<Agent[]>('/agents', fetcher);
+    if (selectedAgent) {
+      const room = `agent:${selectedAgent}`;
+      socketManager.joinRoom(room);
+      return () => {
+        socketManager.leaveRoom(room);
+      };
+    }
+  }, [selectedAgent]);
 
-  // Group scenarios by agent
-  const scenariosByAgent = useMemo(() => {
-    if (!scenarios) return {};
-    const grouped: Record<string, Scenario[]> = {};
-    scenarios.forEach(s => {
-      const aId = s.agentId || 'unknown';
-      if (!grouped[aId]) grouped[aId] = [];
-      grouped[aId].push(s);
-    });
-    return grouped;
-  }, [scenarios]);
+  useSocketEvents({
 
-  // Data for the active agent view
-  const activeAgentScenarios = selectedAgentView && scenariosByAgent[selectedAgentView] ? scenariosByAgent[selectedAgentView] : [];
-  const categories = ['ALL', ...Array.from(new Set(activeAgentScenarios.map(s => s.category) || []))];
-  
-  const filteredScenarios = selectedCategory === 'ALL' 
-    ? activeAgentScenarios 
-    : activeAgentScenarios.filter(s => s.category === selectedCategory);
+  useSocketEvents({
+    'scenario:generation_started': () => {
+      setGenerating(true);
+      setStage(0);
+    },
+    'scenario:generation_progress': (data: any) => {
+       // data might contain progress/stage info if backend implemented it
+       setStage(s => Math.min(s + 1, 6)); 
+    },
+    'scenario:generation_failed': (data: any) => {
+      setGenerating(false);
+      alert('Generation failed: ' + (data.error || 'Unknown error'));
+    },
+    'scenario:generation_completed': () => {
+      setGenerating(false);
+      setStage(7);
+      mutate('/scenarios');
+      mutate('/dashboard/overview');
+    }
+  });
 
-  const activeAgent = agents?.find(a => a.agentId === selectedAgentView);
+  const STAGES = [
+    "ANALYZING AGENT",
+    "MAPPING TOOLS",
+    "IDENTIFYING RISKS",
+    "GENERATING ATTACKS",
+    "CHECKING COVERAGE",
+    "DEDUPLICATING",
+    "BUILDING TEST SUITE",
+    "COMPLETE"
+  ];
 
-  const handleGenerate = async (agentId: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // prevent clicking the card from navigating
-    setGeneratingForAgent(agentId);
+  const handleGenerate = async () => {
+    // In a real application, you might prompt to select an agent first, or use a default one for the hackathon
+    // Since we're fetching from /scenarios, we can just trigger generation on a selected agent.
+    // For demo purposes, we can let the button initiate the socket event simulation locally if backend is stubbed,
+    // or call an actual API if we want to run generation for all agents or a specific one.
+    
+    // We will simulate the generation API call here for UI since the backend route is /agents/:id/generate-scenarios
+    // Let's assume we want to trigger for the first agent
+    setGenerating(true);
+    setStage(0);
+    
     try {
-      await api.post(`/agents/${agentId}/generate-scenarios`, {});
-      
-      // Poll for new scenarios
-      let attempts = 0;
-      const initialCount = scenarios?.length || 0;
-      
-      const pollInterval = setInterval(async () => {
-        const newData = await mutateScenarios();
-        attempts++;
-        
-        // If we found new scenarios, or timed out after 5 minutes (150 attempts)
-        if ((newData && newData.length > initialCount) || attempts > 150) {
-          clearInterval(pollInterval);
-          setGeneratingForAgent(null);
-        }
-      }, 2000);
-      
+      const agents = await api.get('/agents').then(res => res.data);
+      if (agents.length > 0) {
+        await api.post(`/agents/${agents[0].agentId || agents[0].id}/generate-scenarios`);
+      } else {
+        alert("Please create an agent first.");
+        setGenerating(false);
+      }
     } catch (err) {
-      console.error('Failed to generate scenarios:', err);
-      alert('Failed to generate scenarios.');
-      setGeneratingForAgent(null);
+      console.error(err);
+      alert("Generation failed");
+      setGenerating(false);
     }
   };
 
-  // --- VIEW 1: AGENT LIST ---
-  if (!selectedAgentView) {
-    return (
-      <div className="flex flex-col gap-8 pb-12">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b border-border-subtle pb-6">
-          <div>
-            <h1 className="text-display text-content-primary tracking-tight">SCENARIO GROUPS</h1>
-            <p className="text-body-sm text-content-secondary mt-1">Select an agent to view or generate its test cases.</p>
-          </div>
-        </div>
+  const selectedScenario = scenarios.find(s => s.scenarioId === selectedScenarioId || s.id === selectedScenarioId);
 
-        {isLoadingAgents ? (
-          <div className="text-content-muted text-sm py-10 text-center">Loading agents...</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {agents?.map(agent => {
-              const count = scenariosByAgent[agent.agentId]?.length || 0;
-              const isGen = generatingForAgent === agent.agentId;
-              
-              return (
-                <div 
-                  key={agent.agentId}
-                  onClick={() => {
-                    setSelectedAgentView(agent.agentId);
-                    setSelectedCategory('ALL');
-                  }}
-                  className="bg-panel border border-border-subtle rounded-lg p-6 hover:border-border-strong cursor-pointer transition-all hover:-translate-y-1 hover:shadow-glow flex flex-col h-full"
-                >
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="p-2.5 bg-canvas border border-border-subtle rounded-md text-content-primary">
-                      <Database className="w-5 h-5" />
-                    </div>
-                    <Badge variant={count > 0 ? 'success' : 'default'}>{count} Scenarios</Badge>
-                  </div>
-                  
-                  <h3 className="text-lg font-bold text-content-primary mb-1">{agent.name}</h3>
-                  <p className="font-mono text-[11px] text-content-muted mb-6">{agent.agentId}</p>
-                  
-                  <div className="mt-auto pt-4 border-t border-border-subtle">
-                    <Button 
-                      variant={count > 0 ? 'secondary' : 'primary'} 
-                      className="w-full gap-2 text-[13px]" 
-                      onClick={(e) => handleGenerate(agent.agentId, e)}
-                      disabled={isGen}
-                    >
-                      <Lightning className="w-4 h-4" />
-                      {isGen ? 'Generating...' : count > 0 ? 'Generate More' : 'Generate Scenarios'}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // --- VIEW 2: SCENARIOS FOR SELECTED AGENT ---
   return (
-    <div className="flex flex-col gap-8 pb-12">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b border-border-subtle pb-6">
+    <div className="flex flex-col gap-8 pb-12 max-w-6xl mx-auto h-full relative">
+      <header className="flex items-end justify-between">
         <div>
-          <button 
-            onClick={() => setSelectedAgentView(null)}
-            className="flex items-center gap-2 text-[13px] text-content-muted hover:text-content-primary mb-4 transition-colors"
-          >
-            <CaretLeft className="w-4 h-4" /> Back to Agents
-          </button>
-          <h1 className="text-display text-content-primary tracking-tight uppercase">
-            {activeAgent?.name || 'SCENARIOS'}
-          </h1>
-          <p className="text-body-sm text-content-secondary mt-1">Test cases used to evaluate this agent's behavior.</p>
-          <div className="flex gap-4 mt-4 text-xs font-mono text-content-secondary">
-            <span>{activeAgentScenarios.length} scenarios</span>
-            <span>{categories.length - 1} categories</span>
-          </div>
+          <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Scenario Constellation</h1>
+          <p className="text-content-secondary">Adversarial mapping of generated edge cases.</p>
         </div>
-        <div className="flex gap-3">
-          <Button variant="ghost" className="gap-2 text-[13px]">
-            <Plus className="w-4 h-4" />
-            Create Scenario
-          </Button>
-          <Button 
-            onClick={(e) => handleGenerate(selectedAgentView, e)} 
-            disabled={generatingForAgent === selectedAgentView}
-            className="gap-2 bg-info text-white border-info text-[13px] h-9"
-          >
-            <Lightning className="w-4 h-4" />
-            {generatingForAgent === selectedAgentView ? 'Generating...' : 'Generate Scenarios'}
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-4 bg-canvas">
-          <div className="flex items-center gap-2 text-[13px] text-content-muted font-medium shrink-0">
-            <Funnel className="w-4 h-4" /> Filter:
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
-            {categories.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors ${
-                  selectedCategory === cat 
-                    ? 'bg-content-primary text-canvas' 
-                    : 'bg-panel text-content-secondary hover:text-content-primary border border-border-subtle'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        </div>
-        
-        <Table 
-          loading={isLoadingScenarios} 
-          empty={!isLoadingScenarios && (!filteredScenarios || filteredScenarios.length === 0)} 
-          emptyProps={{ 
-            title: generatingForAgent === selectedAgentView ? 'GENERATING SCENARIOS...' : 'NO SCENARIOS YET', 
-            description: generatingForAgent === selectedAgentView 
-              ? (generationProgress ? `Progress: ${generationProgress}...` : 'Please wait, analyzing agent and generating test cases...') 
-              : 'Click "Generate Scenarios" to automatically create test cases for this agent.',
-            icon: generatingForAgent === selectedAgentView ? <Lightning className="w-8 h-8 animate-pulse text-info" /> : undefined
-          }}
+        <button 
+          onClick={handleGenerate}
+          disabled={generating}
+          className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-full font-medium hover:scale-105 transition-transform disabled:opacity-50"
         >
-          <TableHead>
-            <TableHeader>Scenario ID</TableHeader>
-            <TableHeader>Type</TableHeader>
-            <TableHeader>Severity</TableHeader>
-            <TableHeader>Input / Prompt</TableHeader>
-            <TableHeader>Expected Behavior</TableHeader>
-          </TableHead>
-          <TableBody>
-            {filteredScenarios?.map((scenario) => (
-              <TableRow key={scenario.id || scenario._id || scenario.testId}>
-                <TableCell className="font-mono text-info text-xs">{scenario.testId || scenario.scenarioId}</TableCell>
-                <TableCell>
-                  <Badge variant={scenario.category === 'DESTRUCTIVE' ? 'danger' : 'default'}>{scenario.category}</Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={
-                    scenario.severity === 'CRITICAL' ? 'danger' : 
-                    scenario.severity === 'HIGH' ? 'warning' : 
-                    scenario.severity === 'MEDIUM' ? 'default' : 'success'
-                  }>
-                    {scenario.severity}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-content-primary text-[13px]">
-                  <div className="line-clamp-2 max-w-sm">{scenario.scenario || (scenario as any).userInput}</div>
-                </TableCell>
-                <TableCell className="text-content-secondary text-[13px]">
-                  <div className="line-clamp-2 max-w-sm">{scenario.expectedBehavior}</div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+          {generating ? <Spinner className="animate-spin" /> : <Sparkle weight="fill" />}
+          {generating ? 'Generating...' : 'Generate New Suite'}
+        </button>
+      </header>
+
+      {/* Cinematic Generator Overlay */}
+      <AnimatePresence>
+        {generating && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 glass-panel backdrop-blur-xl rounded-xl flex flex-col items-center justify-center p-8"
+          >
+            <div className="flex items-center gap-4 mb-12">
+              <div className="w-4 h-4 rounded-full bg-accent animate-ping" />
+              <div className="text-2xl font-mono text-accent uppercase tracking-widest">{STAGES[stage]}</div>
+            </div>
+            
+            <div className="w-full max-w-xl h-2 bg-panel rounded-full overflow-hidden mb-8">
+              <motion.div 
+                className="h-full bg-accent"
+                initial={{ width: 0 }}
+                animate={{ width: `${((stage + 1) / STAGES.length) * 100}%` }}
+                transition={{ duration: 0.3 }}
+              />
+            </div>
+            
+            <div className="text-center opacity-70">
+              <div className="text-xs uppercase tracking-widest text-content-muted">Awaiting Backend Generation Events via Socket.IO...</div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="flex-1 min-h-125 glass-panel rounded-xl relative overflow-hidden flex flex-col">
+        {/* Toolbar */}
+        <div className="h-14 border-b border-border-subtle flex items-center justify-between px-4">
+          <div className="flex items-center gap-4 text-sm font-medium">
+            <button className="text-white bg-panel-hover px-3 py-1.5 rounded-md">All ({scenarios.length})</button>
+            <button className="text-content-secondary hover:text-white px-3 py-1.5">Edge Cases ({scenarios.filter(s => s.difficulty === 'HARD').length})</button>
+            <button className="text-critical hover:text-critical-strong flex items-center gap-1 px-3 py-1.5"><WarningOctagon weight="bold" /> Adversarial ({scenarios.filter(s => s.category === 'PROMPT_INJECTION' || s.category === 'SECURITY_BYPASS').length})</button>
+          </div>
+          <div className="flex items-center gap-2 bg-panel px-3 py-1.5 rounded-md border border-border-strong">
+            <MagnifyingGlass className="text-content-muted" />
+            <input type="text" placeholder="Search scenarios..." className="bg-transparent border-none outline-none text-sm w-48 text-white" />
+          </div>
+        </div>
+
+        {/* Constellation Visualizer */}
+        <div className="flex-1 relative overflow-hidden bg-[radial-gradient(ellipse_at_center,rgba(24,24,27,1)_0%,rgba(9,9,11,1)_100%)]">
+          
+          {isLoading ? (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Spinner className="w-8 h-8 animate-spin text-content-muted" />
+            </div>
+          ) : scenarios.length === 0 ? (
+            <div className="absolute inset-0 flex items-center justify-center text-content-muted">
+               No scenarios generated yet. Connect an agent and generate a suite.
+            </div>
+          ) : (
+            <>
+              {/* Connections */}
+              <svg className="absolute inset-0 w-full h-full opacity-20 pointer-events-none">
+                {scenarios.slice(0, 30).map((_, i) => (
+                  <line 
+                    key={i}
+                    x1={`${10 + (Math.random() * 80)}%`}
+                    y1={`${10 + (Math.random() * 80)}%`}
+                    x2={`${10 + (Math.random() * 80)}%`}
+                    y2={`${10 + (Math.random() * 80)}%`}
+                    stroke="varcontent-muted"
+                    strokeWidth="1"
+                  />
+                ))}
+              </svg>
+
+              {/* Nodes */}
+              {scenarios.map((scenario, i) => {
+                const isCritical = scenario.severity === 'CRITICAL';
+                const isWarning = scenario.severity === 'HIGH' || scenario.difficulty === 'HARD';
+                const color = isCritical ? 'varcritical' : isWarning ? 'varwarning' : 'varsafe';
+                
+                // Using pseudo-random positions based on index so they don't jump around on re-renders as much
+                const seededTop = `${10 + ((i * 13) % 80)}%`;
+                const seededLeft = `${10 + ((i * 17) % 80)}%`;
+                
+                return (
+                  <motion.div
+                    key={scenario.scenarioId || scenario.id || i}
+                    initial={{ opacity: 0, scale: 0 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: (i % 20) * 0.05, duration: 0.5 }}
+                    className="absolute w-3 h-3 rounded-full cursor-pointer hover:scale-150 transition-transform z-10"
+                    style={{ top: seededTop, left: seededLeft, backgroundColor: color, boxShadow: `0 0 10px ${color}` }}
+                    title={scenario.name || scenario.description}
+                    onClick={() => setSelectedScenarioId(scenario.scenarioId || scenario.id)}
+                  />
+                );
+              })}
+            </>
+          )}
+
+          {/* Overlay card for selected scenario */}
+          <AnimatePresence>
+            {selectedScenario && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="absolute bottom-6 left-6 w-80 glass-panel p-5 border border-border-subtle rounded-xl shadow-2xl z-20"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <span className={`text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded ${selectedScenario.severity === 'CRITICAL' ? 'text-critical bg-critical-muted' : 'text-safe bg-safe-muted'}`}>
+                    {selectedScenario.category}
+                  </span>
+                  <span className="text-[10px] uppercase font-bold tracking-widest text-content-secondary">{selectedScenario.difficulty}</span>
+                </div>
+                <p className="text-sm text-white mb-4 line-clamp-2">"{selectedScenario.input?.messages?.[0]?.content || selectedScenario.description}"</p>
+                <div className="text-xs text-content-muted flex items-center justify-between">
+                  <span className="line-clamp-1">Target: <span className="font-mono text-white">{selectedScenario.targetTool || 'General'}</span></span>
+                </div>
+                <button className="mt-4 w-full text-xs font-semibold py-1.5 bg-white/10 hover:bg-white/20 rounded text-white" onClick={() => setSelectedScenarioId(null)}>Close</button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+        </div>
       </div>
     </div>
   );

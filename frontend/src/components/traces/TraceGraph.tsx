@@ -131,7 +131,7 @@ export default function TraceGraph({ trace, activeEventIndex, isReplaying }: { t
         target: e2.eventId || `node-${i+1}`,
         animated: isEdgeActive || !isReplaying,
         style: { 
-          stroke: isFailedTarget && isPastEdge ? 'var(--color-critical)' : 'var(--color-border-strong)', 
+          stroke: isFailedTarget && isPastEdge ? 'varcritical' : 'varborder-strong', 
           strokeWidth: isEdgeActive ? 3 : 2,
           opacity: edgeOpacity,
           transition: 'stroke 0.3s, opacity 0.3s'
@@ -140,7 +140,7 @@ export default function TraceGraph({ trace, activeEventIndex, isReplaying }: { t
           type: MarkerType.ArrowClosed,
           width: 20,
           height: 20,
-          color: isFailedTarget && isPastEdge ? 'var(--color-critical)' : 'var(--color-border-strong)',
+          color: isFailedTarget && isPastEdge ? 'varcritical' : 'varborder-strong',
         },
       });
     }

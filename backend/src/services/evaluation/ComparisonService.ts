@@ -25,6 +25,24 @@ export interface CompareResult {
 }
 
 export class ComparisonService {
+  static async autoCompareWithPrevious(evalId: string): Promise<CompareResult | null> {
+    const currentEval = await Evaluation.findById(evalId);
+    if (!currentEval) throw new Error('Evaluation not found');
+    
+    // Find the most recent completed evaluation for the same agent before this one
+    const prevEval = await Evaluation.findOne({
+      agentId: currentEval.agentId,
+      status: 'COMPLETED',
+      timestamp: { $lt: currentEval.timestamp }
+    }).sort({ timestamp: -1 });
+
+    if (!prevEval) {
+      return null;
+    }
+
+    return this.compare(prevEval._id.toString(), currentEval._id.toString());
+  }
+
   static async compare(evalIdA: string, evalIdB: string): Promise<CompareResult> {
     const evalA = await Evaluation.findById(evalIdA);
     const evalB = await Evaluation.findById(evalIdB);

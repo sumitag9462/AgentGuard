@@ -1,6 +1,6 @@
 import pytest
-from tool_registry import ToolDefinition, MockToolExecutor, create_tool_definitions_from_config
-from sandbox import Sandbox
+from sandbox.tool_registry import ToolDefinition, MockToolExecutor, create_tool_definitions_from_config
+from sandbox.sandbox import Sandbox
 
 @pytest.fixture
 def agent_config():

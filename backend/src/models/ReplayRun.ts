@@ -49,6 +49,5 @@ const ReplayRunSchema: Schema = new Schema({
 });
 
 ReplayRunSchema.index({ originalTraceId: 1 });
-ReplayRunSchema.index({ replayId: 1 });
 
 export const ReplayRun = mongoose.model<IReplayRun>('ReplayRun', ReplayRunSchema);

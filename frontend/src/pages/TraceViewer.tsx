@@ -1,120 +1,61 @@
-import { useParams, useNavigate } from 'react-router-dom';
-import { CaretLeft, Play, Bug, Stop, Clock } from '@phosphor-icons/react';
-import TraceGraph from '../components/traces/TraceGraph';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { MagnifyingGlass, Clock, CaretLeft, Spinner, ChatTeardrop, Wrench, ShieldWarning } from '@phosphor-icons/react';
 import useSWR from 'swr';
 import { fetcher } from '../services/apiClient';
-import { useState, useCallback, useEffect } from 'react';
-import { Button } from '../components/ui/Button';
-import type { Trace } from '../types';
 
 export default function TraceViewer() {
-  const { id } = useParams(); // this is the testId
-  const navigate = useNavigate();
-  
-  const { data: trace, isLoading } = useSWR<Trace>(`/traces/${id}`, fetcher);
-  
-  const [replayState, setReplayState] = useState<'IDLE' | 'PLAYING' | 'FINISHED'>('IDLE');
-  const [activeEventIndex, setActiveEventIndex] = useState<number>(-1);
+  const { testId } = useParams();
+  const [searchParams] = useSearchParams();
+  const { data: trace, isLoading } = useSWR(`/traces/${testId}`, fetcher);
 
-  // Replay Logic
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-    if (replayState === 'PLAYING' && trace && trace.events.length > 0) {
-      interval = setInterval(() => {
-        setActiveEventIndex(prev => {
-          if (prev >= trace.events.length - 1) {
-            setReplayState('FINISHED');
-            return prev;
-          }
-          return prev + 1;
-        });
-      }, 1000); // 1 second per node reveal
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [replayState, trace]);
-
-  const handleStartReplay = useCallback(() => {
-    setReplayState('PLAYING');
-    setActiveEventIndex(-1); // Will tick to 0 immediately
-  }, []);
-
-  const handleStopReplay = useCallback(() => {
-    setReplayState('IDLE');
-    setActiveEventIndex(-1);
-  }, []);
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col gap-6 max-w-5xl mx-auto p-8 text-center mt-20">
-        <div className="w-8 h-8 rounded-full border-2 border-content-muted border-t-accent animate-spin mx-auto" />
-        <div className="text-content-secondary font-mono text-sm">Loading execution trace...</div>
-      </div>
-    );
-  }
-
-  if (!trace || !trace.events || trace.events.length === 0) {
-    return (
-      <div className="flex flex-col gap-6 max-w-5xl mx-auto p-8 text-center mt-20">
-        <div className="text-content-secondary p-8 border border-border-subtle bg-surface rounded-md">
-          <Bug className="w-10 h-10 text-content-muted mx-auto mb-4" />
-          <h2 className="text-lg font-bold text-content-primary mb-2">No Trace Data</h2>
-          <p>This evaluation did not record execution steps for this scenario.</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Count errors
-  const errorCount = trace.events.filter(e => e.status === 'danger').length;
+  if (isLoading) return <div className="p-12 text-center"><Spinner className="animate-spin inline-block text-3xl" /></div>;
+  if (!trace) return <div className="p-12 text-center text-red-400">Trace not found for {testId}</div>;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] p-4 max-w-350 mx-auto w-full">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4 shrink-0 bg-surface border border-border-subtle p-4 rounded-lg shadow-sm">
-        <div className="flex items-center gap-6">
-          <button 
-            onClick={() => navigate(-1)}
-            className="flex items-center justify-center w-9 h-9 rounded-md bg-panel border border-border-subtle text-content-secondary hover:text-content-primary hover:bg-panel-hover transition-colors"
-          >
-            <CaretLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h1 className="text-xl font-bold text-content-primary">Execution Trace</h1>
-            <div className="flex items-center gap-4 mt-1">
-              <span className="text-[11px] text-content-secondary font-mono bg-canvas px-2 py-0.5 rounded border border-border-subtle">ID: {trace.testId}</span>
-              <span className="text-[11px] text-content-muted flex items-center gap-1"><Clock className="w-3 h-3" /> {trace.events.length} steps recorded</span>
-            </div>
+    <div className="flex flex-col gap-6 pb-12 max-w-5xl mx-auto">
+      <button onClick={() => window.history.back()} className="text-sm font-medium text-content-muted hover:text-white transition-colors flex items-center gap-1 w-fit">
+        <CaretLeft /> Back
+      </button>
+
+      <header className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-full bg-accent-muted flex items-center justify-center text-accent">
+          <MagnifyingGlass weight="fill" className="text-xl" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Execution Trace</h1>
+          <div className="flex items-center gap-2 text-xs text-content-secondary font-mono">
+            <span>Test ID: {testId}</span>
+            <span>•</span>
+            <span>Agent: {trace.agentId}</span>
           </div>
         </div>
+      </header>
 
-        <div className="flex items-center gap-4">
-          {errorCount > 0 && replayState === 'IDLE' && (
-            <div className="text-xs font-bold text-critical bg-critical-muted px-3 py-1.5 rounded-full border border-critical/20 flex items-center gap-2">
-              <Bug weight="fill" /> {errorCount} Failure{errorCount !== 1 ? 's' : ''} Detected
-            </div>
-          )}
-          
-          {replayState === 'PLAYING' ? (
-            <Button variant="secondary" onClick={handleStopReplay}>
-              <Stop className="w-4 h-4 mr-2" weight="fill" /> Stop Replay
-            </Button>
-          ) : (
-            <Button variant="primary" onClick={handleStartReplay} className={replayState === 'FINISHED' ? 'bg-panel text-content-primary' : 'shadow-glow-accent'}>
-              <Play className="w-4 h-4 mr-2" weight="fill" /> {replayState === 'FINISHED' ? 'Replay Trace' : 'Follow the Failure'}
-            </Button>
-          )}
+      <div className="glass-panel p-6 rounded-xl flex flex-col gap-6">
+        <div className="text-xs font-bold uppercase tracking-widest text-content-muted flex items-center gap-2 border-b border-border-subtle pb-4">
+          <Clock /> Event Timeline
         </div>
-      </div>
-
-      {/* Trace Graph Container */}
-      <div className="flex-1 rounded-lg border border-border-strong bg-[#0F0F13] overflow-hidden relative shadow-inner">
-        <TraceGraph 
-          trace={trace} 
-          activeEventIndex={replayState === 'IDLE' ? -1 : activeEventIndex}
-          isReplaying={replayState === 'PLAYING' || replayState === 'FINISHED'}
-        />
+        
+        <div className="flex flex-col gap-4 pl-4 border-l border-border-subtle ml-2 relative">
+          {trace.events?.map((evt: any, idx: number) => (
+            <div key={idx} className="relative">
+              <div className="absolute -left-6 top-1 w-4 h-4 rounded-full bg-panel border-2 border-border-strong flex items-center justify-center">
+                {evt.type === 'tool_call' ? <Wrench className="text-info text-[10px]" weight="fill" /> : 
+                 evt.type === 'llm_response' ? <ChatTeardrop className="text-accent text-[10px]" weight="fill" /> :
+                 evt.type === 'violation' ? <ShieldWarning className="text-critical text-[10px]" weight="fill" /> :
+                 <div className="w-1.5 h-1.5 rounded-full bg-content-muted" />}
+              </div>
+              <div className="bg-panel-hover p-4 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-bold uppercase text-content-secondary">{evt.type || 'Event'}</div>
+                  <div className="text-[10px] text-content-muted">{new Date(evt.timestamp).toLocaleTimeString()}</div>
+                </div>
+                <pre className="text-xs font-mono whitespace-pre-wrap text-white break-all">{typeof evt.data === 'string' ? evt.data : JSON.stringify(evt.data, null, 2)}</pre>
+              </div>
+            </div>
+          ))}
+          {!trace.events?.length && <div className="text-content-muted text-sm">No events recorded in this trace.</div>}
+        </div>
       </div>
     </div>
   );

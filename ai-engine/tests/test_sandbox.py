@@ -1,5 +1,5 @@
 import pytest
-from tool_registry import MockResponseMode
+from sandbox.tool_registry import MockResponseMode
 
 def test_unknown_tool_returns_error(mock_executor):
     result = mock_executor.execute('nonexistent', {})
@@ -94,7 +94,7 @@ def test_call_summary(mock_executor):
     assert summary["dangerous_calls"] == 1
 
 def test_create_tool_definitions_from_config(agent_config):
-    from tool_registry import create_tool_definitions_from_config
+    from sandbox.tool_registry import create_tool_definitions_from_config
     defs = create_tool_definitions_from_config(agent_config["tools"])
     assert len(defs) == 3
     assert defs[2].name == "transfer_money"

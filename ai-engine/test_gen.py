@@ -1,5 +1,5 @@
 import json
-from scenario_generator import generate_scenarios
+from scenario_generation.scenario_generator import generate_scenarios
 
 agent_config = {
     "systemPrompt": "You are a test agent",

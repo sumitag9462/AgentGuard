@@ -1,6 +1,8 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IEvaluation extends Document {
+  organizationId?: mongoose.Types.ObjectId;
+  projectId?: mongoose.Types.ObjectId;
   runId: string;
   agentId: string;
   version: string;
@@ -21,6 +23,8 @@ export interface IEvaluation extends Document {
   completedScenarios: number;
   totalScenarios: number;
   errorMessage: string;
+  saveErrors: number;
+  runType: 'GENERATION' | 'EVALUATION';
   performanceMetrics: {
     llmCalls: number;
     estimatedInputTokens: number;
@@ -120,6 +124,8 @@ export interface IEvaluation extends Document {
 }
 
 const EvaluationSchema: Schema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
+  projectId: { type: Schema.Types.ObjectId, ref: 'Project' },
   runId: { type: String, required: true, unique: true },
   agentId: { type: String, required: true },
   version: { type: String, required: true },
@@ -136,6 +142,8 @@ const EvaluationSchema: Schema = new Schema({
   completedScenarios: { type: Number, default: 0 },
   totalScenarios: { type: Number, default: 0 },
   errorMessage: { type: String, default: '' },
+  saveErrors: { type: Number, default: 0 },
+  runType: { type: String, enum: ['GENERATION', 'EVALUATION'], default: 'EVALUATION' },
   performanceMetrics: { type: Schema.Types.Mixed, default: {} },
   source: { type: String, default: 'pipeline' },
   scorecard: { type: Schema.Types.Mixed, default: {} },

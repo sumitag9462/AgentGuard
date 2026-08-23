@@ -13,6 +13,7 @@ export interface ITrace extends Document {
   traceId: string;
   testId: string;
   evaluationId: string;
+  status: 'PASS' | 'FAIL' | 'TIMEOUT' | 'INFRASTRUCTURE_ERROR';
   events: ITraceEvent[];
 }
 
@@ -29,6 +30,7 @@ const TraceSchema: Schema = new Schema({
   traceId: { type: String, required: true, unique: true },
   testId: { type: String, required: true },
   evaluationId: { type: String, required: true },
+  status: { type: String, enum: ['PASS', 'FAIL', 'TIMEOUT', 'INFRASTRUCTURE_ERROR'], required: true },
   events: [TraceEventSchema]
 });
 

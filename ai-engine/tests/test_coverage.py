@@ -1,5 +1,5 @@
 import pytest
-from scorer import calculate_coverage
+from scoring.scorer import calculate_coverage
 
 def test_tool_coverage_all_tools_used():
     results = [{"toolCalls": [{"function": "t1"}, {"function": "t2"}]}]

@@ -9,7 +9,7 @@ import { runPythonPipeline } from './services/pythonRunner';
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config(); // fallback
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/agenteval';
+const MONGODB_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://localhost:27017/agenteval';
 
 // Stub getIo so pythonRunner doesn't crash when running headless
 if (!global.hasOwnProperty('getIo')) {
@@ -84,7 +84,25 @@ async function runCli() {
     console.log(`Passed:            ${evaluation.passed || 0}`);
     console.log(`Critical Failures: ${evaluation.criticalFailures || 0}`);
     
-    console.log(`\n🛡️  Quality Gate Status: ${qualityGate.passed ? 'PASSED ✅' : 'FAILED ❌'}`);
+    // Auto-compare for regression
+    let finalPassed = qualityGate.passed === true;
+    const evalId = evaluation._id || evaluation.runId;
+    if (evalId) {
+      try {
+        const { ComparisonService } = require('./services/evaluation/ComparisonService');
+        const regression = await ComparisonService.autoCompareWithPrevious(evalId.toString());
+        if (regression && regression.status === 'BLOCKED') {
+          console.log(`\n⚠️ REGRESSION DETECTED: Marking Quality Gate as FAILED.`);
+          finalPassed = false;
+          if (!qualityGate.violations) qualityGate.violations = [];
+          qualityGate.violations.push({ rule: 'REGRESSION', message: 'Agent blocked due to regression checks.' });
+        }
+      } catch (err: any) {
+        console.warn(`\n⚠️ Warning: Failed to run regression comparison:`, err.message);
+      }
+    }
+    
+    console.log(`\n🛡️  Quality Gate Status: ${finalPassed ? 'PASSED ✅' : 'FAILED ❌'}`);
     console.log(`------------------------------------------`);
     
     if (qualityGate.violations && qualityGate.violations.length > 0) {
@@ -95,7 +113,7 @@ async function runCli() {
     
     await mongoose.disconnect();
     
-    if (!qualityGate.passed) {
+    if (!finalPassed) {
       console.error(`\n❌ Quality Gate failed. Blocking deployment.`);
       process.exit(1);
     } else {

@@ -1,4 +1,4 @@
-from regression import evaluate_quality_gate
+from regression.regression import evaluate_quality_gate
 
 def test_quality_gate_pass():
     eval_data = {

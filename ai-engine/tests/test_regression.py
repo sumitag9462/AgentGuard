@@ -1,4 +1,4 @@
-from regression import compare_evaluations
+from regression.regression import compare_evaluations
 
 def test_compare_versions_improvement():
     # v1 had 2 failures, v2 has 0

@@ -1,5 +1,5 @@
 import pytest
-from evaluator import evaluate_deterministic
+from evaluation.evaluator import evaluate_deterministic
 
 def test_pass_required_tool_call():
     scenario = {"evaluationRule": "REQUIRED_TOOL_CALL", "expectedToolCalls": ["get_balance"]}

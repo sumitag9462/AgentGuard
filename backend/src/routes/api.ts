@@ -5,6 +5,27 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
 import { eventBus } from '../services/eventBus';
+import mongoose from 'mongoose';
+import dashboardRoutes from './dashboard';
+
+const router = express.Router();
+
+router.use('/dashboard', dashboardRoutes);
+
+// F-011: Health Endpoints
+router.get('/health', (req, res) => {
+  res.status(200).json({ status: 'UP', timestamp: new Date().toISOString() });
+});
+
+router.get('/ready', async (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  // 1 = connected
+  if (dbState === 1) {
+    res.status(200).json({ status: 'READY', database: 'connected' });
+  } else {
+    res.status(503).json({ status: 'NOT_READY', database: 'disconnected' });
+  }
+});
 
 const AgentSchema = z.object({
   body: z.object({
@@ -31,8 +52,6 @@ const CompareRequestSchema = z.object({
     eval2: z.string().min(1),
   })
 });
-
-const router = express.Router();
 
 // ==========================================================================
 // AGENTS
@@ -143,7 +162,14 @@ router.delete('/agents/:id', async (req, res) => {
 router.get('/scenarios', async (req, res) => {
   try {
     const filter: any = {};
-    if (req.query.agentId) filter.agentId = req.query.agentId;
+    if (req.query.agentId) {
+      filter.agentId = req.query.agentId as string;
+      // When fetching scenarios for an agent, only return the active batch
+      const agent = await Agent.findOne({ agentId: req.query.agentId as string });
+      if (agent?.activeBatchId) {
+        filter.batchId = agent.activeBatchId;
+      }
+    }
     if (req.query.category) filter.category = req.query.category;
     if (req.query.severity) filter.severity = req.query.severity;
     if (req.query.isAdaptive) filter.isAdaptive = req.query.isAdaptive === 'true';
@@ -159,9 +185,25 @@ router.get('/scenarios', async (req, res) => {
 router.post('/scenarios', async (req, res) => {
   try {
     const scenarioId = req.body.scenarioId || `SC-${crypto.randomBytes(4).toString('hex')}`;
+    
+    // Auto-assign manual scenarios to the active batch
+    const agent = await Agent.findOne({ agentId: req.body.agentId });
+    let batchId = req.body.batchId;
+    
+    if (agent && !batchId) {
+      if (agent.activeBatchId) {
+        batchId = agent.activeBatchId;
+      } else {
+        // If they have no batch at all, stamp one and make it active
+        batchId = `BATCH-${crypto.randomBytes(6).toString('hex')}`;
+        await Agent.updateOne({ agentId: req.body.agentId }, { activeBatchId: batchId });
+      }
+    }
+    
     const newScenario = new Scenario({
       ...req.body,
       scenarioId,
+      batchId,
       scenario: req.body.scenario || req.body.userInput
     });
     await newScenario.save();
@@ -177,6 +219,19 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
     const agent = await Agent.findOne({ agentId: req.params.id });
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
     
+    // F-009: Idempotency check for generation
+    const idempotencyKey = req.headers['idempotency-key'];
+    if (idempotencyKey) {
+      const existingRun = await Evaluation.findOne({ runId: idempotencyKey, runType: 'GENERATION' });
+      if (existingRun) {
+        return res.status(200).json({ runId: existingRun.runId, evaluationId: existingRun._id, status: existingRun.status, count: req.body.count || 10 });
+      }
+    } else {
+      if (agent.scenarioGenerationStatus === 'GENERATING') {
+        return res.status(409).json({ error: 'Scenarios are already being generated for this agent.' });
+      }
+    }
+    
     let count = req.body.count;
     if (!count) {
       const baseCount = 10;
@@ -186,7 +241,7 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
       count = Math.min(100, baseCount + toolCount * 2 + criticalBonus + policyBonus);
     }
     
-    const runId = `GEN-${crypto.randomInt(1000, 9999)}`;
+    const runId = `GEN-${crypto.randomBytes(6).toString('hex')}`;
     const batchId = runId;
     
     // Create a placeholder evaluation to track the generation
@@ -195,158 +250,38 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
       agentId: agent.agentId,
       version: agent.latestVersion,
       status: 'PENDING',
+      runType: 'GENERATION',
       timestamp: new Date()
     });
     await newEval.save();
     
-    // Process synchronously instead of using Redis to guarantee it runs locally
-    // (BullMQ hangs if Redis is not installed)
-    const { runPythonPipeline } = require('../services/pythonRunner');
-    
-    // Send response immediately so UI doesn't hang
-    res.status(202).json({ runId, evaluationId: newEval._id, status: 'GENERATING', count });
-    
-    // Run in background
-    setTimeout(async () => {
-      try {
-        // Set generating status
-        await Agent.findOneAndUpdate(
-          { agentId: agent.agentId },
-          { scenarioGenerationStatus: 'GENERATING' }
-        );
-        
-        const payload = await runPythonPipeline('generate-scenarios', {
-          agentId: agent.agentId,
-          name: agent.name,
-          version: agent.latestVersion,
-          domain: agent.domain,
-          systemPrompt: agent.systemPrompt,
-          tools: agent.tools,
-          policies: agent.policies,
-        }, {
-          evaluationId: newEval._id.toString(),
-          runId,
-          count
-        });
-        
-        const scenarios = payload.scenarios || [];
-        for (const sc of scenarios) {
-          const newScenario = new Scenario({
-            scenarioId: sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`,
-            agentId: agent.agentId,
-            title: sc.title || '',
-            category: sc.category,
-            difficulty: sc.difficulty || 'MEDIUM',
-            severity: sc.severity,
-            scenario: sc.userInput,
-            expectedBehavior: sc.expectedBehavior,
-            rule: sc.evaluationRule,
-            allowedActions: sc.allowedActions || [],
-            forbiddenActions: sc.forbiddenActions || [],
-            expectedToolCalls: sc.expectedToolCalls || [],
-            forbiddenToolCalls: sc.forbiddenToolCalls || [],
-            expectedFinalOutcome: sc.expectedFinalOutcome || '',
-            attackObjective: sc.attackObjective || '',
-            riskLevel: sc.riskLevel || 'LOW',
-            batchId
-          });
-          await newScenario.save();
-        }
-        
-        // Update agent with active batch info
-        const totalScenarios = await Scenario.countDocuments({ agentId: agent.agentId });
-        await Agent.findOneAndUpdate(
-          { agentId: agent.agentId },
-          {
-            activeBatchId: batchId,
-            scenarioGenerationStatus: 'READY',
-            scenarioCount: totalScenarios
-          }
-        );
-        
-        newEval.status = 'COMPLETED';
-        await newEval.save();
-        
-        eventBus.emit('evaluation_log', { agentId: agent.agentId, type: 'complete', message: `Generated ${scenarios.length} scenarios` });
-      } catch (err: any) {
-        console.error('Generation failed:', err);
-        newEval.status = 'FAILED';
-        (newEval as any).error = err.message;
-        await newEval.save();
-        
-        await Agent.findOneAndUpdate(
-          { agentId: agent.agentId },
-          { scenarioGenerationStatus: 'FAILED' }
-        );
-      }
-    }, 100);
-    
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to trigger scenario generation' });
-  }
-});
-
-// DEBUG: Synchronous generation endpoint
-router.post('/agents/:id/debug-generate', async (req, res) => {
-  try {
-    const agent = await Agent.findOne({ agentId: req.params.id });
-    if (!agent) return res.status(404).json({ error: 'Agent not found' });
-    
-    const count = 3;
-    const runId = `GEN-${crypto.randomInt(1000, 9999)}`;
-    const newEval = new Evaluation({ runId, agentId: agent.agentId, version: agent.latestVersion || '1.0.0', status: 'PENDING' });
-    await newEval.save();
-    
-    const { runPythonPipeline } = require('../services/pythonRunner');
-    const payload = await runPythonPipeline('generate-scenarios', {
-      agentId: agent.agentId,
-      name: agent.name,
-      version: agent.latestVersion,
-      domain: agent.domain,
-      systemPrompt: agent.systemPrompt,
-      tools: agent.tools,
-      policies: agent.policies,
-    }, {
+    // Process via queue
+    await evaluationQueue.add('generate-scenarios', {
       evaluationId: newEval._id.toString(),
       runId,
-      count
+      agentId: agent.agentId,
+      version: agent.latestVersion,
+      mode: 'generate-scenarios',
+      count: Number(count)
     });
     
-    const scenarios = payload.scenarios || [];
-    const saved = [];
-    for (const sc of scenarios) {
-      const newScenario = new Scenario({
-        scenarioId: sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`,
-        agentId: agent.agentId,
-        title: sc.title || '',
-        category: sc.category,
-        difficulty: sc.difficulty || 'MEDIUM',
-        severity: sc.severity,
-        scenario: sc.userInput,
-        expectedBehavior: sc.expectedBehavior,
-        rule: sc.evaluationRule
-      });
-      await newScenario.save();
-      saved.push(newScenario);
-    }
+    // Set generating status
+    await Agent.findOneAndUpdate(
+      { agentId: agent.agentId },
+      { scenarioGenerationStatus: 'GENERATING' }
+    );
     
-    res.json({ success: true, payload, saved });
+    const { getIo } = require('../index');
+    getIo().to('agent:' + agent.agentId).emit('scenario:generation_started', { agentId: agent.agentId, runId });
+    
+    res.status(202).json({ runId, evaluationId: newEval._id, status: 'GENERATING', count });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed', message: err.message, stack: err.stack });
-  }
-});
-
-// DELETE scenario
-router.delete('/scenarios/:id', async (req, res) => {
-  try {
-    await Scenario.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to delete scenario' });
+    res.status(500).json({ error: 'Failed to generate scenarios', details: err.message });
   }
 });
 
 // ==========================================================================
+
 // EVALUATIONS
 // ==========================================================================
 
@@ -354,8 +289,9 @@ router.delete('/scenarios/:id', async (req, res) => {
 router.get('/evaluations', async (req, res) => {
   try {
     const filter: any = {};
-    if (req.query.agentId) filter.agentId = req.query.agentId;
+    if (req.query.agentId) filter.agentId = req.query.agentId as string;
     if (req.query.status) filter.status = req.query.status;
+    if (req.query.runType) filter.runType = req.query.runType;
     
     const evals = await Evaluation.find(filter).sort({ timestamp: -1 });
     res.json(evals);
@@ -391,12 +327,16 @@ router.get('/evaluations/:id/report/download', async (req, res) => {
     md += `Passed: ${evaluation.passed}\n`;
     md += `Failed: ${evaluation.failed}\n`;
     md += `Critical: ${evaluation.criticalFailures}\n`;
-    md += `High: 0\nMedium: 0\nLow: 0\n\n`; // Defaulting to 0 as placeholders unless computed.
-
+    const severityCounts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
     const failureBreakdown: Record<string, number> = {};
     failures.forEach(f => {
       failureBreakdown[f.failureType] = (failureBreakdown[f.failureType] || 0) + 1;
+      if (f.severity === 'HIGH') severityCounts.HIGH++;
+      if (f.severity === 'MEDIUM') severityCounts.MEDIUM++;
+      if (f.severity === 'LOW') severityCounts.LOW++;
     });
+
+    md += `High: ${severityCounts.HIGH}\nMedium: ${severityCounts.MEDIUM}\nLow: ${severityCounts.LOW}\n\n`;
 
     md += `## Failure Breakdown\n\n`;
     if (Object.keys(failureBreakdown).length > 0) {
@@ -539,52 +479,37 @@ router.get('/evaluations/:id/results', async (req, res) => {
         severity: s.severity,
         scenario: s.scenario,
         expectedBehavior: s.expectedBehavior,
-        rule: s.rule
+        forbiddenBehavior: (s as any).forbiddenBehavior
       }));
     } else {
-      // No scenario reference — use traces as the basis
-      scenarioList = traces.map(t => ({ scenarioId: t.testId }));
+      scenarioList = [];
     }
-    
-    // Build unified results
-    const results = scenarioList.map(sc => {
-      const testId = sc.scenarioId || sc.testId;
-      const failure = failureMap.get(testId);
-      const trace = traceMap.get(testId);
+
+    const results = scenarioList.map(s => {
+      const trace = traceMap.get(s.scenarioId);
+      const failure = failureMap.get(s.scenarioId);
       
-      if (failure) {
-        return {
-          scenarioId: testId,
-          category: sc.category || failure.category || 'N/A',
-          severity: sc.severity || failure.severity || 'LOW',
-          status: failure.failureType === 'INFRASTRUCTURE_ERROR' || failure.failureType === 'EXECUTION_ERROR'
-            ? 'INFRASTRUCTURE_ERROR'
-            : failure.failureType === 'TIMEOUT' ? 'TIMEOUT' : 'FAIL',
-          expected: sc.expectedBehavior || failure.expectedBehavior || '',
-          actual: failure.actualBehavior || '',
-          failureCategory: failure.failureType || '',
-          rootCause: failure.rootCause || '',
-          recommendations: failure.recommendation ? [failure.recommendation] : [],
-          confidence: failure.riskScore || null,
-          traceId: trace?.traceId || null,
-          hasTrace: !!trace
-        };
-      } else {
-        return {
-          scenarioId: testId,
-          category: sc.category || 'N/A',
-          severity: sc.severity || 'LOW',
-          status: 'PASS',
-          expected: sc.expectedBehavior || '',
-          actual: 'Scenario passed all checks.',
-          failureCategory: null,
-          rootCause: null,
-          recommendations: [],
-          confidence: null,
-          traceId: trace?.traceId || null,
-          hasTrace: !!trace
-        };
+      let status = 'PENDING';
+      // Use trace status if it exists, otherwise fall back to old logic
+      if (trace && trace.status) {
+        status = trace.status;
+      } else if (failure) {
+        status = failure.failureType === 'EXECUTION_ERROR' ? 'INFRASTRUCTURE_ERROR' : 'FAIL';
+      } else if (trace) {
+        status = 'PASS';
       }
+
+      return {
+        ...s,
+        status,
+        failure: failure ? {
+          failureType: failure.failureType,
+          severity: failure.severity,
+          reason: failure.reason,
+          recommendation: failure.recommendation
+        } : null,
+        traceId: trace ? trace.traceId : null
+      };
     });
     
     res.json({
@@ -612,8 +537,32 @@ router.post('/evaluations', validate(EvaluationRequestSchema), async (req, res) 
     const agent = await Agent.findOne({ agentId });
     if (!agent) return res.status(404).json({ error: `Agent ${agentId} not found` });
     
+    // F-009: Idempotency (Prevent rapid duplicate clicks)
+    const idempotencyKey = req.headers['idempotency-key'];
+    if (idempotencyKey) {
+      const existingRun = await Evaluation.findOne({ runId: idempotencyKey });
+      if (existingRun) {
+        return res.status(200).json({ runId: existingRun.runId, evaluationId: existingRun._id, status: existingRun.status });
+      }
+    } else {
+      // Fallback: Check if there's a recently created evaluation (within 10 seconds)
+      const tenSecondsAgo = new Date(Date.now() - 10000);
+      const recentRun = await Evaluation.findOne({
+        agentId,
+        status: { $in: ['PENDING', 'RUNNING'] },
+        timestamp: { $gte: tenSecondsAgo }
+      });
+      if (recentRun) {
+        return res.status(409).json({ error: 'An evaluation for this agent is already queued or running.' });
+      }
+    }
+    
     // ENFORCEMENT (§2): API-layer scenario count check
-    const scenarioCount = await Scenario.countDocuments({ agentId });
+    const batchFilter = agent.activeBatchId 
+      ? { agentId, batchId: agent.activeBatchId }
+      : { agentId, $or: [{ batchId: { $exists: false } }, { batchId: '' }] };
+      
+    const scenarioCount = await Scenario.countDocuments(batchFilter);
     if (scenarioCount === 0) {
       return res.status(409).json({
         error: 'Evaluation cannot start because this agent has no generated test scenarios. Generate scenarios first.'
@@ -621,7 +570,7 @@ router.post('/evaluations', validate(EvaluationRequestSchema), async (req, res) 
     }
     
     // Fetch scenarios for immutable snapshot
-    const scenarios = await Scenario.find({ agentId }).lean();
+    const scenarios = await Scenario.find(batchFilter).lean();
     const scenarioIds = scenarios.map(s => s.scenarioId);
     const scenarioSnapshot = scenarios.map(s => ({
       scenarioId: s.scenarioId,
@@ -653,7 +602,7 @@ router.post('/evaluations', validate(EvaluationRequestSchema), async (req, res) 
       qualityGate: agent.qualityGate || {}
     };
     
-    const runId = `RUN-${crypto.randomInt(1000, 9999)}`;
+    const runId = `RUN-${crypto.randomBytes(6).toString('hex')}`;
     const newEval = new Evaluation({
       runId,
       agentId,
@@ -697,7 +646,7 @@ router.post('/evaluations/:id/adaptive', async (req, res) => {
       return res.status(400).json({ error: 'No failures to base adaptive testing on' });
     }
     
-    const runId = `ADAPT-${crypto.randomInt(1000, 9999)}`;
+    const runId = `ADAPT-${crypto.randomBytes(6).toString('hex')}`;
     const newEval = new Evaluation({
       runId,
       agentId: sourceEval.agentId,
@@ -842,6 +791,20 @@ router.get('/compare', async (req, res) => {
   }
 });
 
+// GET auto-regression for an evaluation
+router.get('/evaluations/:id/auto-regression', async (req, res) => {
+  try {
+    const result = await ComparisonService.autoCompareWithPrevious(req.params.id);
+    if (!result) {
+      return res.status(200).json({ message: 'No previous evaluation found for comparison', result: null });
+    }
+    res.json({ result });
+  } catch (err: any) {
+    console.error('Auto-regression error:', err);
+    res.status(500).json({ error: 'Failed to run auto-regression', details: err.message });
+  }
+});
+
 // POST apply quality gate
 router.post('/evaluations/:id/gate', async (req, res) => {
   try {
@@ -927,7 +890,7 @@ router.get('/evaluations/:id/export', async (req, res) => {
 router.get('/test-suites', async (req, res) => {
   try {
     const filter: any = {};
-    if (req.query.agentId) filter.agentId = req.query.agentId;
+    if (req.query.agentId) filter.agentId = req.query.agentId as string;
     const suites = await TestSuite.find(filter);
     res.json(suites);
   } catch (err) {

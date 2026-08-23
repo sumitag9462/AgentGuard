@@ -1,3 +1,4 @@
+import { eventBus } from './eventBus';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -29,7 +30,7 @@ export const runPythonPipeline = async (
     
     // Write agent config to temp file so Python can read it
     const tmpDir = os.tmpdir();
-    const configPath = path.join(tmpDir, `agenteval_config_${Date.now()}.json`);
+    const configPath = path.join(tmpDir, `agenteval_config_${Date.now()}_${Math.random().toString().slice(2,8)}.json`);
     fs.writeFileSync(configPath, JSON.stringify(agentConfig));
     
     // Build command args
@@ -44,7 +45,8 @@ export const runPythonPipeline = async (
     }
     
     if (mode === 'adaptive' && options.previousResults) {
-      const prevResultsPath = path.join(tmpDir, `agenteval_prev_${Date.now()}.json`);
+      (options as any).prevResultsPath = path.join(tmpDir, `agenteval_prev_${Date.now()}_${Math.random().toString().slice(2,8)}.json`);
+      const prevResultsPath = (options as any).prevResultsPath;
       fs.writeFileSync(prevResultsPath, JSON.stringify(options.previousResults));
       args.push('--previous-results', prevResultsPath);
     }
@@ -53,7 +55,7 @@ export const runPythonPipeline = async (
       args.push('--scenarios', options.scenariosPath);
     }
     
-    const outputPath = path.join(tmpDir, `agenteval_output_${Date.now()}.json`);
+    const outputPath = path.join(tmpDir, `agenteval_output_${Date.now()}_${Math.random().toString().slice(2,8)}.json`);
     args.push('--output', outputPath);
     
     console.log(`Running Python pipeline: python3 ${args.join(' ')}`);
@@ -77,25 +79,50 @@ export const runPythonPipeline = async (
       }
     }
 
+
     const runId = options.runId || 'unknown';
+    
+    // Timeout logic (60 minutes)
+    const TIMEOUT_MS = 60 * 60 * 1000;
+    const timeoutId = setTimeout(() => {
+      pythonProcess.kill('SIGKILL');
+      reject(new Error(`Python process timed out after ${TIMEOUT_MS / 1000}s`));
+    }, TIMEOUT_MS);
+    
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      try { fs.unlinkSync(configPath); } catch {}
+      try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
+      try { if ((options as any).prevResultsPath) fs.unlinkSync((options as any).prevResultsPath); } catch {}
+    };
     
     pythonProcess.stdout.on('data', (data) => {
       const output = data.toString();
       stdoutData += output;
       console.log(`[python-stdout] ${output}`);
-      io.emit('evaluation_log', { runId, type: 'stdout', message: output });
+      io.to('evaluation:' + runId).emit('evaluation_log', { runId, type: 'stdout', message: output });
+      
+      // Parse progress markers
+      const progressMatch = output.match(/---RESULT_PROGRESS_START---\s*(.*?)\s*---RESULT_PROGRESS_END---/);
+      if (progressMatch && options.evaluationId) {
+        try {
+          const progressData = JSON.parse(progressMatch[1]);
+          eventBus.emit('scenario_completed', { evaluationId: options.evaluationId, data: progressData });
+        } catch(e) {
+          console.error("Failed to parse progress data:", e);
+        }
+      }
     });
     
     pythonProcess.stderr.on('data', (data) => {
       const output = data.toString();
       stderrData += output;
       console.error(`[python-stderr] ${output}`);
-      io.emit('evaluation_log', { runId, type: 'stderr', message: output });
+      io.to('evaluation:' + runId).emit('evaluation_log', { runId, type: 'stderr', message: output });
     });
     
     pythonProcess.on('close', (code) => {
-      // Clean up temp config file
-      try { fs.unlinkSync(configPath); } catch {}
+      cleanup();
       
       if (code === 0) {
         // Try to parse the JSON output
@@ -113,7 +140,6 @@ export const runPythonPipeline = async (
           } else if (fs.existsSync(outputPath)) {
             // Fallback: read from output file
             const result = JSON.parse(fs.readFileSync(outputPath, 'utf-8'));
-            try { fs.unlinkSync(outputPath); } catch {}
             resolve(result);
           } else {
             resolve({ raw: stdoutData });
@@ -130,15 +156,14 @@ export const runPythonPipeline = async (
     });
     
     pythonProcess.on('error', (err) => {
-      try { fs.unlinkSync(configPath); } catch {}
+      cleanup();
       reject(new Error(`Failed to spawn Python process: ${err.message}`));
     });
   });
 };
 
+
 // Legacy compat
 export const runPythonEvaluation = async (evaluationId: string, runId: string) => {
-  // This legacy method is kept for backward compatibility but
-  // new code should use runPythonPipeline directly
   return runPythonPipeline('evaluate', {}, { evaluationId, runId });
 };

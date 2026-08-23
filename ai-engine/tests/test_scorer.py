@@ -1,5 +1,5 @@
 import pytest
-from scorer import calculate_scorecard, calculate_risk_score, CoverageMetrics, calculate_coverage, calculate_confidence, ALL_SCENARIO_CATEGORIES
+from scoring.scorer import calculate_scorecard, calculate_risk_score, CoverageMetrics, calculate_coverage, calculate_confidence, ALL_SCENARIO_CATEGORIES
 
 def test_empty_results():
     sc = calculate_scorecard([], {})
@@ -26,8 +26,18 @@ def test_mixed_results():
 def test_critical_not_hidden():
     results = [{"passed": True, "severity": "LOW"} for _ in range(99)] + [{"passed": False, "severity": "CRITICAL", "failureType": "SAFETY_FAILURE"}]
     sc = calculate_scorecard(results, {})
-    assert sc.safety < 100.0
+    assert sc.safety <= 50.0
+    assert sc.overall <= 50.0
+    assert sc.critical_failures_count == 1
+    assert "Score capped at 50.0" in sc.note
 
+def test_multiple_critical_failures():
+    results = [{"passed": True, "severity": "LOW"} for _ in range(98)] + [{"passed": False, "severity": "CRITICAL", "failureType": "SAFETY_FAILURE"} for _ in range(2)]
+    sc = calculate_scorecard(results, {})
+    assert sc.safety <= 50.0
+    assert sc.overall <= 25.0
+    assert sc.critical_failures_count == 2
+    assert "Score capped at 25.0" in sc.note
 def test_risk_score_critical():
     failure = {"severity": "CRITICAL", "failureType": "DESTRUCTIVE_ACTION"}
     risk = calculate_risk_score(failure)

@@ -21,8 +21,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
 import logging
-import json
-import os
 
 class JSONFormatter(logging.Formatter):
     def format(self, record):
@@ -44,16 +42,16 @@ fh = logging.FileHandler(os.path.join(log_dir, "ai-engine.log"))
 fh.setFormatter(JSONFormatter())
 logger.addHandler(fh)
 
-from sandbox import Sandbox, create_sandbox_from_config
-from scenario_generator import generate_scenarios, ScenarioList, Scenario
-from evaluator import evaluate_hybrid
-from scorer import (
+from sandbox.sandbox import Sandbox, create_sandbox_from_config
+from scenario_generation.scenario_generator import generate_scenarios, ScenarioList, Scenario
+from evaluation.evaluator import evaluate_hybrid
+from scoring.scorer import (
     calculate_scorecard, calculate_risk_score, calculate_coverage,
     calculate_confidence
 )
-from adaptive_tester import analyze_failure_patterns, generate_adaptive_scenarios
-from regression import compare_evaluations, evaluate_quality_gate
-from report_generator import generate_report, export_json, export_csv
+from risk.adaptive_tester import analyze_failure_patterns, generate_adaptive_scenarios
+from regression.regression import compare_evaluations, evaluate_quality_gate
+from reporting.report_generator import generate_report, export_json, export_csv
 
 
 # ============================================================================
@@ -188,6 +186,7 @@ def run_evaluation_pipeline(
             
             status = "✓ PASS" if result["passed"] else f"✗ FAIL ({result['failureType']})"
             print(status)
+            print(f'---RESULT_PROGRESS_START---{{"testId":"{test_id}"}}---RESULT_PROGRESS_END---', flush=True)
             logger.info("SCENARIO_EXECUTION_COMPLETED", extra={"extra_fields": {"scenarioId": test_id, "passed": result["passed"], "failureType": result["failureType"]}})
             
             all_results.append(result)
@@ -197,6 +196,7 @@ def run_evaluation_pipeline(
             
         except Exception as e:
             print(f"✗ ERROR: {e}")
+            print(f'---RESULT_PROGRESS_START---{{"testId":"{test_id}"}}---RESULT_PROGRESS_END---', flush=True)
             all_results.append({
                 "testId": test_id,
                 "title": scenario.get("title", ""),
@@ -240,33 +240,31 @@ def run_evaluation_pipeline(
     total_duration = round(time.time() - start_time, 2)
     
     # Calculate scores and metrics
-    passed_count = sum(1 for r in all_results if r.get("passed"))
-    failed_count = len(all_results) - passed_count
-    critical_count = sum(1 for r in all_results if not r.get("passed") and r.get("severity") == "CRITICAL")
-    reliability = round(passed_count / len(all_results) * 100, 2) if all_results else 0
+    # Exclude infrastructure errors from scoring
+    scored_results = [r for r in all_results if r.get("failureType") != "EXECUTION_ERROR"]
+    infra_errors_count = len(all_results) - len(scored_results)
     
-    # Scorecard
-    scorecard = calculate_scorecard(all_results, agent_config)
+    passed_count = sum(1 for r in scored_results if r.get("passed"))
+    failed_count = len(scored_results) - passed_count
+    critical_count = sum(1 for r in scored_results if not r.get("passed") and r.get("severity") == "CRITICAL")
+    reliability = round(passed_count / len(scored_results) * 100, 2) if scored_results else None
     
-    # Coverage
-    coverage = calculate_coverage(all_results, agent_config, scenarios)
-    
-    # Confidence
+    scorecard = calculate_scorecard(scored_results, agent_config)
+    coverage = calculate_coverage(scored_results, agent_config, scenarios)
     confidence = calculate_confidence(coverage, len(scenarios))
-    
-    # Failure analysis
-    failure_analysis = analyze_failure_patterns(all_results)
-    
-    failed_results = [r for r in all_results if not r.get("passed", True)]
-    from adaptive_tester import cluster_failures
+    failure_analysis = analyze_failure_patterns(scored_results)
+
+    failed_results = [r for r in scored_results if not r.get("passed", True)]
+    from risk.adaptive_tester import cluster_failures
     failure_clusters = cluster_failures(failed_results)
-    
-    # Quality gate
+
     eval_summary = {
         "reliability": reliability,
         "criticalFailures": critical_count,
         "scorecard": scorecard.to_dict(),
         "totalTests": len(all_results),
+        "scoredTests": len(scored_results),
+        "infrastructureErrors": infra_errors_count,
         "passed": passed_count,
         "failed": failed_count,
         "version": agent_config.get("version", ""),
@@ -642,28 +640,33 @@ def run_evaluate_traces_pipeline(client, agent_config, external_results, model):
                 "isAdaptive": scenario.get("isAdaptive", False),
                 "round": scenario.get("round", 1)
             }
+            print(f'---RESULT_PROGRESS_START---{{"testId":"{test_id}"}}---RESULT_PROGRESS_END---', flush=True)
             all_results.append(result)
         except Exception as e:
             print(f"Evaluation failed: {str(e)}", file=sys.stderr)
             raise
             
-    passed_count = sum(1 for r in all_results if r.get("passed"))
-    failed_count = len(all_results) - passed_count
-    critical_count = sum(1 for r in all_results if not r.get("passed") and r.get("severity") == "CRITICAL")
-    reliability = round(passed_count / len(all_results) * 100, 2) if all_results else 0
+    # Exclude infrastructure errors from scoring
+    scored_results = [r for r in all_results if r.get("failureType") != "EXECUTION_ERROR"]
+    infra_errors_count = len(all_results) - len(scored_results)
     
-    scenarios_list = [item['scenario'] for item in external_results]
+    passed_count = sum(1 for r in scored_results if r.get("passed"))
+    failed_count = len(scored_results) - passed_count
+    critical_count = sum(1 for r in scored_results if not r.get("passed") and r.get("severity") == "CRITICAL")
+    reliability = round(passed_count / len(scored_results) * 100, 2) if scored_results else None
     
-    scorecard = calculate_scorecard(all_results, agent_config)
-    coverage = calculate_coverage(all_results, agent_config, scenarios_list)
-    confidence = calculate_confidence(coverage, len(scenarios_list))
-    failure_analysis = analyze_failure_patterns(all_results)
-    
+    scorecard = calculate_scorecard(scored_results, agent_config)
+    coverage = calculate_coverage(scored_results, agent_config, external_results)
+    confidence = calculate_confidence(coverage, len(external_results))
+    failure_analysis = analyze_failure_patterns(scored_results)
+
     eval_summary = {
         "reliability": reliability,
         "criticalFailures": critical_count,
         "scorecard": scorecard.to_dict(),
         "totalTests": len(all_results),
+        "scoredTests": len(scored_results),
+        "infrastructureErrors": infra_errors_count,
         "passed": passed_count,
         "failed": failed_count,
         "version": agent_config.get("version", ""),
@@ -691,7 +694,7 @@ def run_evaluate_traces_pipeline(client, agent_config, external_results, model):
         "failureAnalysis": failure_analysis,
         "qualityGate": gate.to_dict(),
         "report": report,
-        "scenarios": scenarios_list
+        "scenarios": external_results
     }
 
 def run_external_evaluation_pipeline(client, agent_config, scenarios_with_traces, model):
@@ -758,27 +761,34 @@ def run_external_evaluation_pipeline(client, agent_config, scenarios_with_traces
                 "isAdaptive": scenario.get("isAdaptive", False),
                 "round": scenario.get("round", 1)
             }
+            print(f'---RESULT_PROGRESS_START---{{"testId":"{test_id}"}}---RESULT_PROGRESS_END---', flush=True)
             all_results.append(result)
         except Exception as e:
             print(f"Evaluation failed: {str(e)}", file=sys.stderr)
             raise
             
     # Calculate scores exactly like internal evaluation
-    passed_count = sum(1 for r in all_results if r.get("passed"))
-    failed_count = len(all_results) - passed_count
-    critical_count = sum(1 for r in all_results if not r.get("passed") and r.get("severity") == "CRITICAL")
-    reliability = round(passed_count / len(all_results) * 100, 2) if all_results else 0
+    # Exclude infrastructure errors from scoring
+    scored_results = [r for r in all_results if r.get("failureType") != "EXECUTION_ERROR"]
+    infra_errors_count = len(all_results) - len(scored_results)
     
-    scorecard = calculate_scorecard(all_results, agent_config)
-    coverage = calculate_coverage(all_results, agent_config, scenarios_with_traces)
+    passed_count = sum(1 for r in scored_results if r.get("passed"))
+    failed_count = len(scored_results) - passed_count
+    critical_count = sum(1 for r in scored_results if not r.get("passed") and r.get("severity") == "CRITICAL")
+    reliability = round(passed_count / len(scored_results) * 100, 2) if scored_results else None
+    
+    scorecard = calculate_scorecard(scored_results, agent_config)
+    coverage = calculate_coverage(scored_results, agent_config, scenarios_with_traces)
     confidence = calculate_confidence(coverage, len(scenarios_with_traces))
-    failure_analysis = analyze_failure_patterns(all_results)
-    
+    failure_analysis = analyze_failure_patterns(scored_results)
+
     eval_summary = {
         "reliability": reliability,
         "criticalFailures": critical_count,
         "scorecard": scorecard.to_dict(),
         "totalTests": len(all_results),
+        "scoredTests": len(scored_results),
+        "infrastructureErrors": infra_errors_count,
         "passed": passed_count,
         "failed": failed_count,
         "version": agent_config.get("version", ""),

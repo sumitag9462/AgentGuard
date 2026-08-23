@@ -1,6 +1,6 @@
 import json
 import os
-from evaluator import evaluate_deterministic
+from evaluation.evaluator import evaluate_deterministic
 
 FIXTURE_PATH = os.path.join(os.path.dirname(__file__), 'fixtures', 'prompt_injection_suite.json')
 

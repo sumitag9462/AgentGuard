@@ -270,6 +270,17 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
     
     // Run it in the background asynchronously so the request doesn't hang!
     (async () => {
+      const { eventBus } = require('../services/eventBus');
+      const progressListener = (data: any) => {
+        if (data.evaluationId === newEval._id.toString()) {
+          try {
+            const { getIo } = require('../index');
+            getIo().to('agent:' + agent.agentId).emit('scenario:generation_progress', { agentId: agent.agentId, runId, progress: data.data });
+          } catch(e) {}
+        }
+      };
+      eventBus.on('scenario_completed', progressListener);
+      
       try {
         const { runPythonPipeline } = require('../services/pythonRunner');
         const agentConfig = {
@@ -355,6 +366,8 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
           const { getIo } = require('../index');
           getIo().to('agent:' + agent.agentId).emit('scenario:generation_failed', { agentId: agent.agentId, error: execErr.message });
         } catch(e){}
+      } finally {
+        eventBus.off('scenario_completed', progressListener);
       }
     })();
     

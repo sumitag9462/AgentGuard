@@ -60,7 +60,9 @@ export default function Scenarios() {
     try {
       const agents = await api.get('/agents').then(res => res.data);
       if (agents.length > 0) {
-        await api.post(`/agents/${agents[0].agentId || agents[0].id}/generate-scenarios`);
+        const targetAgentId = agents[0].agentId || agents[0].id;
+        socketManager.joinRoom('agent:' + targetAgentId);
+        await api.post(`/agents/${targetAgentId}/generate-scenarios`);
       } else {
         alert("Please create an agent first.");
         setGenerating(false);

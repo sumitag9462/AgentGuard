@@ -1,8 +1,9 @@
 import { io, Socket } from 'socket.io-client';
 import { useEffect, useRef } from 'react';
 
-// Use standard API URL or fallback to localhost
-const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+// Use standard API URL or fallback to localhost, but strip /api to avoid wrong namespace
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const SOCKET_URL = API_URL.replace(/\/api\/?$/, '');
 
 class SocketManager {
   private static instance: SocketManager;

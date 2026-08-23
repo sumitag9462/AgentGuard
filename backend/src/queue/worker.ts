@@ -9,12 +9,26 @@ const redisOptions = {
   port: parseInt(process.env.REDIS_PORT || '6379'),
 };
 
-export const evaluationQueue = new Queue('evaluations', { connection: redisOptions });
+// Disable BullMQ to prevent ECONNREFUSED crashes on Render without Redis
+export const evaluationQueue = {
+  add: async (name: string, data: any) => {
+    console.log(`Mock queue added: ${name}`, data);
+    return { id: `mock-${Date.now()}` };
+  }
+} as unknown as Queue;
 
-let activeWorker: Worker | null = null;
+let activeWorker: any = null;
 
 export const startWorker = () => {
-  activeWorker = new Worker('evaluations', async (job) => {
+  console.log('Worker disabled (running in mock mode without Redis)');
+};
+
+export const closeWorker = async () => {
+  console.log('Mock worker closed');
+};
+
+// Keep the old worker logic around for reference if needed
+const disabledWorkerLogic = async (job: any) => {
     const { evaluationId, runId, agentId, version, mode, count, previousResults } = job.data;
     
     console.log(`Starting job ${job.id} for Evaluation ${runId} (mode: ${mode || 'evaluate'})`);
@@ -460,24 +474,9 @@ export const startWorker = () => {
       
       throw err;
     }
-
-  }, { connection: redisOptions });
-
-  activeWorker.on('failed', (job, err) => {
-    if (job) {
-      console.error(`Worker failed job ${job.id} with error: ${err.message}`);
-    }
-  });
-
-  console.log('BullMQ worker started successfully.');
 };
 
-export const closeWorker = async () => {
-  if (activeWorker) {
-    await activeWorker.close();
-  }
-  await evaluationQueue.close();
-};
+
 
 // Helper functions for trace mapping
 function _mapStepType(stepType: string): string {

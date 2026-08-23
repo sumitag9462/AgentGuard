@@ -232,7 +232,7 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
       }
     }
     
-    let count = req.body.count;
+    let count = req.body?.count;
     if (!count) {
       const baseCount = 10;
       const toolCount = agent.tools?.length || 0;

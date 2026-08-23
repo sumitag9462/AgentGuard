@@ -255,125 +255,113 @@ router.post('/agents/:id/generate-scenarios', async (req, res) => {
     });
     await newEval.save();
     
-    // Process via queue
+    // Bypass queue completely for Hackathon demo on Render
+    await Agent.findOneAndUpdate(
+      { agentId: agent.agentId },
+      { scenarioGenerationStatus: 'GENERATING' }
+    );
+    
     try {
-      await evaluationQueue.add('generate-scenarios', {
-        evaluationId: newEval._id.toString(),
-        runId,
-        agentId: agent.agentId,
-        version: agent.latestVersion,
-        mode: 'generate-scenarios',
-        count: Number(count)
-      });
-      
-      // Set generating status
-      await Agent.findOneAndUpdate(
-        { agentId: agent.agentId },
-        { scenarioGenerationStatus: 'GENERATING' }
-      );
-      
       const { getIo } = require('../index');
       getIo().to('agent:' + agent.agentId).emit('scenario:generation_started', { agentId: agent.agentId, runId });
-    } catch (queueErr) {
-      console.warn("Queue unavailable, falling back to mock generation for demo", queueErr);
-      
-      // Set generating status
-      await Agent.findOneAndUpdate(
-        { agentId: agent.agentId },
-        { scenarioGenerationStatus: 'GENERATING' }
-      );
-      
-      const { getIo } = require('../index');
-      getIo().to('agent:' + agent.agentId).emit('scenario:generation_started', { agentId: agent.agentId, runId });
-      
-      // Run it in the background asynchronously so the request doesn't hang!
-      (async () => {
-        try {
-          const { runPythonPipeline } = require('../services/pythonRunner');
-          const agentConfig = {
-            agentId: agent.agentId,
-            name: agent.name,
-            version: agent.latestVersion,
-            domain: agent.domain,
-            systemPrompt: agent.systemPrompt,
-            tools: agent.tools.map((t: any) => ({
-              name: t.name,
-              description: t.description,
-              inputSchema: t.inputSchema || {},
-              outputSchema: t.outputSchema || {},
-              riskLevel: t.riskLevel || 'LOW',
-              sideEffectLevel: t.sideEffectLevel || 'NONE'
-            })),
-            policies: (agent.policies || []).map((p: any) => ({
-              name: p.name,
-              description: p.description
-            })),
-            prohibitedActions: agent.prohibitedActions || [],
-            maxToolCalls: agent.maxToolCalls || 20,
-            qualityGate: agent.qualityGate || {}
-          };
-          
-          const payload = await runPythonPipeline('generate-scenarios', agentConfig, {
-            evaluationId: newEval._id.toString(),
-            runId,
-            count: Number(count) || 10
-          });
-          
-          const scenarios = payload.scenarios || [];
-          let savedCount = 0;
-          for (const sc of scenarios) {
-            try {
-              const scenarioId = sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`;
-              const newScenario = new Scenario({
-                scenarioId,
-                agentId: agent.agentId,
-                title: sc.title || '',
-                category: sc.category,
-                difficulty: sc.difficulty || 'MEDIUM',
-                severity: sc.severity || 'MEDIUM',
-                scenario: sc.userInput,
-                context: sc.context || '',
-                agentGoal: sc.agentGoal || '',
-                expectedBehavior: sc.expectedBehavior,
-                allowedActions: sc.allowedActions || [],
-                forbiddenActions: sc.forbiddenActions || [],
-                expectedToolCalls: sc.expectedToolCalls || [],
-                forbiddenToolCalls: sc.forbiddenToolCalls || [],
-                expectedFinalOutcome: sc.expectedFinalOutcome || '',
-                rule: sc.evaluationRule || 'Default rule',
-                attackObjective: sc.attackObjective || '',
-                riskLevel: sc.riskLevel || 'LOW',
-                isAdaptive: sc.isAdaptive || false,
-                round: sc.round || 1,
-                batchId: runId
-              });
-              await newScenario.save();
-              savedCount++;
-            } catch (scErr) {
-              console.warn(`Failed to save scenario ${sc.testId}:`, scErr);
-            }
-          }
-          
-          await Agent.findOneAndUpdate(
-            { agentId: agent.agentId },
-            { scenarioGenerationStatus: 'READY', scenarioCount: savedCount }
-          );
-          getIo().to('agent:' + agent.agentId).emit('scenario:generation_completed', { agentId: agent.agentId, runId });
-          
-        } catch (execErr: any) {
-          console.error("In-memory generation failed:", execErr);
-          await Agent.findOneAndUpdate(
-            { agentId: agent.agentId },
-            { scenarioGenerationStatus: 'IDLE' }
-          );
-          getIo().to('agent:' + agent.agentId).emit('scenario:generation_failed', { agentId: agent.agentId, error: execErr.message });
-        }
-      })();
+    } catch(e) {
+      console.warn("Could not emit socket event", e);
     }
+    
+    // Run it in the background asynchronously so the request doesn't hang!
+    (async () => {
+      try {
+        const { runPythonPipeline } = require('../services/pythonRunner');
+        const agentConfig = {
+          agentId: agent.agentId,
+          name: agent.name,
+          version: agent.latestVersion || 'v1.0',
+          domain: agent.domain,
+          systemPrompt: agent.systemPrompt,
+          tools: (agent.tools || []).map((t: any) => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema || {},
+            outputSchema: t.outputSchema || {},
+            riskLevel: t.riskLevel || 'LOW',
+            sideEffectLevel: t.sideEffectLevel || 'NONE'
+          })),
+          policies: (agent.policies || []).map((p: any) => ({
+            name: p.name,
+            description: p.description
+          })),
+          prohibitedActions: agent.prohibitedActions || [],
+          maxToolCalls: agent.maxToolCalls || 20,
+          qualityGate: agent.qualityGate || {}
+        };
+        
+        const payload = await runPythonPipeline('generate-scenarios', agentConfig, {
+          evaluationId: newEval._id.toString(),
+          runId,
+          count: Number(count) || 10
+        });
+        
+        const scenarios = payload.scenarios || [];
+        let savedCount = 0;
+        for (const sc of scenarios) {
+          try {
+            const scenarioId = sc.testId || `SC-${crypto.randomBytes(4).toString('hex')}`;
+            const newScenario = new Scenario({
+              scenarioId,
+              agentId: agent.agentId,
+              title: sc.title || '',
+              category: sc.category || 'Robustness',
+              difficulty: sc.difficulty || 'MEDIUM',
+              severity: sc.severity || 'MEDIUM',
+              scenario: sc.userInput,
+              context: sc.context || '',
+              agentGoal: sc.agentGoal || '',
+              expectedBehavior: sc.expectedBehavior || 'N/A',
+              allowedActions: sc.allowedActions || [],
+              forbiddenActions: sc.forbiddenActions || [],
+              expectedToolCalls: sc.expectedToolCalls || [],
+              forbiddenToolCalls: sc.forbiddenToolCalls || [],
+              expectedFinalOutcome: sc.expectedFinalOutcome || '',
+              rule: sc.evaluationRule || 'Default rule',
+              attackObjective: sc.attackObjective || '',
+              riskLevel: sc.riskLevel || 'LOW',
+              isAdaptive: sc.isAdaptive || false,
+              round: sc.round || 1,
+              batchId: runId
+            });
+            await newScenario.save();
+            savedCount++;
+          } catch (scErr) {
+            console.warn(`Failed to save scenario ${sc.testId}:`, scErr);
+          }
+        }
+        
+        await Agent.findOneAndUpdate(
+          { agentId: agent.agentId },
+          { scenarioGenerationStatus: 'READY', scenarioCount: savedCount }
+        );
+        try {
+          const { getIo } = require('../index');
+          getIo().to('agent:' + agent.agentId).emit('scenario:generation_completed', { agentId: agent.agentId, runId });
+        } catch(e){}
+        
+      } catch (execErr: any) {
+        console.error("In-memory generation failed:", execErr);
+        await Agent.findOneAndUpdate(
+          { agentId: agent.agentId },
+          { scenarioGenerationStatus: 'IDLE' }
+        );
+        try {
+          const { getIo } = require('../index');
+          getIo().to('agent:' + agent.agentId).emit('scenario:generation_failed', { agentId: agent.agentId, error: execErr.message });
+        } catch(e){}
+      }
+    })();
     
     res.status(202).json({ runId, evaluationId: newEval._id, status: 'GENERATING', count });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to generate scenarios', details: err.message });
+    console.error('Generation trigger failed:', err);
+    res.status(500).json({ error: 'Failed to generate scenarios', details: err.message, stack: err.stack });
   }
 });
 

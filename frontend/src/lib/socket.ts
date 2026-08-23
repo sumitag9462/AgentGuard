@@ -72,8 +72,6 @@ class SocketManager {
   }
 
   public getSocket() {
-
-  public getSocket() {
     return this.socket;
   }
 }

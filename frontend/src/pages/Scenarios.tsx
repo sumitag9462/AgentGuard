@@ -14,19 +14,6 @@ export default function Scenarios() {
 
   const { data: scenarios = [], isLoading } = useSWR<any[]>('/scenarios', fetcher);
 
-  // Subscribe to generation events
-  useEffect(() => {
-    if (selectedAgent) {
-      const room = `agent:${selectedAgent}`;
-      socketManager.joinRoom(room);
-      return () => {
-        socketManager.leaveRoom(room);
-      };
-    }
-  }, [selectedAgent]);
-
-  useSocketEvents({
-
   useSocketEvents({
     'scenario:generation_started': () => {
       setGenerating(true);
@@ -170,7 +157,7 @@ export default function Scenarios() {
                     y1={`${10 + (Math.random() * 80)}%`}
                     x2={`${10 + (Math.random() * 80)}%`}
                     y2={`${10 + (Math.random() * 80)}%`}
-                    stroke="varcontent-muted"
+                    stroke="var(--color-content-muted)"
                     strokeWidth="1"
                   />
                 ))}
@@ -180,7 +167,7 @@ export default function Scenarios() {
               {scenarios.map((scenario, i) => {
                 const isCritical = scenario.severity === 'CRITICAL';
                 const isWarning = scenario.severity === 'HIGH' || scenario.difficulty === 'HARD';
-                const color = isCritical ? 'varcritical' : isWarning ? 'varwarning' : 'varsafe';
+                const color = isCritical ? 'var(--color-critical)' : isWarning ? 'var(--color-warning)' : 'var(--color-safe)';
                 
                 // Using pseudo-random positions based on index so they don't jump around on re-renders as much
                 const seededTop = `${10 + ((i * 13) % 80)}%`;
